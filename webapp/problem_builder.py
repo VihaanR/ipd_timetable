@@ -155,13 +155,47 @@ def readiness(
     division_stmt = select(Division)
     if branch_ids is not None:
         division_stmt = division_stmt.where(Division.branch_id.in_(branch_ids))
-    division_count = len(session.exec(division_stmt).all())
-    if division_count == 0:
+    division_rows = session.exec(division_stmt).all()
+    if len(division_rows) == 0:
         issues.append("no divisions defined")
 
     slot_count = len(session.exec(select(SlotTemplate)).all())
     if slot_count == 0:
         issues.append("no time slots defined")
+
+    if issues:
+        return None, issues
+
+    # Guard against whole-institution id collisions: `build_problem_dict` emits the bare
+    # `Division.name`/`Course.code` as the engine id (unique only *within* a branch — see the
+    # module docstring), so the default whole-institution solve (branch_ids=None) would silently
+    # merge two branches' divisions/courses in the engine's id-keyed lookups
+    # (`division_by_id()`/`course_by_code()`) if their names/codes collide. Detected here, against
+    # the same branch_ids-filtered rows that will actually be emitted, and BEFORE `problem_from_dict`
+    # so a collision surfaces as a readiness issue instead of corrupting the snapshot silently.
+    division_name_counts: dict[str, int] = {}
+    for d in division_rows:
+        division_name_counts[d.name] = division_name_counts.get(d.name, 0) + 1
+    for name in sorted(division_name_counts):
+        if division_name_counts[name] > 1:
+            issues.append(
+                f"division name '{name}' is used by more than one included branch — rename so "
+                "the whole-institution solve has unique division ids"
+            )
+
+    course_stmt = select(Course)
+    if branch_ids is not None:
+        course_stmt = course_stmt.where(Course.branch_id.in_(branch_ids))
+    course_rows = session.exec(course_stmt).all()
+    course_code_counts: dict[str, int] = {}
+    for c in course_rows:
+        course_code_counts[c.code] = course_code_counts.get(c.code, 0) + 1
+    for code in sorted(course_code_counts):
+        if course_code_counts[code] > 1:
+            issues.append(
+                f"course code '{code}' is used by more than one included branch — rename so "
+                "the whole-institution solve has unique course ids"
+            )
 
     if issues:
         return None, issues

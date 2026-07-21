@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, create_engine
 
 from webapp.db import set_engine, init_db, get_engine
+from webapp.jobs import sweep_stale_running
 from webapp.models_db import TimetableRun
 from webapp.server import app
 
@@ -73,6 +74,34 @@ def test_generate_single_flight_conflict(client):
 
     r = client.post("/api/runs", json={"solver": "greedy", "time_limit": 3})
     assert r.status_code == 409
+
+
+def test_sweep_clears_orphaned_queued_run_and_unblocks_generate(client):
+    """A process that dies between `POST /api/runs` inserting a `queued` row and the background
+    task flipping it to `running` leaves that row permanently `queued` — nothing in a fresh
+    process will ever pick it up. Before the fix, `sweep_stale_running` only looked at `running`
+    rows, so this `queued` row would keep `has_active_run` true forever and every subsequent
+    `POST /api/runs` would 409 with no recovery path. Assert the sweep clears it and generate
+    is unblocked afterward."""
+    with Session(get_engine()) as session:
+        run = TimetableRun(status="queued", solver="greedy", time_limit=1, problem_snapshot={})
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+        run_id = run.id
+
+    with Session(get_engine()) as session:
+        swept = sweep_stale_running(session)
+        assert swept == 1
+
+    with Session(get_engine()) as session:
+        run = session.get(TimetableRun, run_id)
+        assert run.status == "failed"
+        assert run.error == "orphaned by restart"
+
+    _seed(client)
+    r = client.post("/api/runs", json={"solver": "greedy", "time_limit": 3})
+    assert r.status_code != 409, r.text
 
 
 def test_generate_unknown_solver_rejected(client):

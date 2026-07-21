@@ -44,15 +44,18 @@ def generate(
     background: BackgroundTasks,
     session: Session = Depends(get_session),
 ):
-    problem, issues = readiness(session, body.branch_ids)
-    if problem is None or issues:
-        raise HTTPException(status_code=400, detail=issues)
-
+    # Cheapest check first: the single-flight guard is one indexed row lookup, so it must reject
+    # a busy platform (409) before we pay for the expensive readiness build below (which assembles
+    # and validates the whole-institution ProblemInstance).
     if has_active_run(session):
         raise HTTPException(status_code=409, detail="a run is already in progress")
 
     if body.solver != "pipeline" and body.solver not in SOLVERS:
         raise HTTPException(status_code=400, detail=f"unknown solver {body.solver!r}")
+
+    problem, issues = readiness(session, body.branch_ids)
+    if problem is None or issues:
+        raise HTTPException(status_code=400, detail=issues)
 
     run = TimetableRun(
         status="queued",
@@ -116,38 +119,40 @@ def _get_done_run(run_id: int, session: Session) -> TimetableRun:
     return run
 
 
-@router.get("/runs/{run_id}/export.xlsx")
-def export_run_xlsx(run_id: int, session: Session = Depends(get_session)):
-    run = _get_done_run(run_id, session)
+def _export_response(run: TimetableRun, export_fn, suffix: str, media_type: str) -> FileResponse:
+    """Shared body for the xlsx/pdf export routes. Reconstructs the problem+solution from the
+    already-fetched `run`'s stored snapshot, writes them to a fresh temp file via `export_fn`, and
+    streams it back. If `export_fn` raises, the just-created (still-empty) temp file is unlinked
+    before re-raising — otherwise the FileResponse (and its unlink-after-streaming background task)
+    is never constructed, and the empty temp file leaks on every failed export."""
     problem = problem_from_dict(run.problem_snapshot)
     solution = solution_from_dict(run.solution)
 
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
     tmp.close()
-    export_xlsx(solution, problem, tmp.name)
+    try:
+        export_fn(solution, problem, tmp.name)
+    except Exception:
+        os.unlink(tmp.name)
+        raise
     return FileResponse(
         tmp.name,
-        filename=f"timetable_run_{run_id}.xlsx",
-        media_type=XLSX_MEDIA_TYPE,
+        filename=f"timetable_run_{run.id}{suffix}",
+        media_type=media_type,
         background=BackgroundTask(os.unlink, tmp.name),  # delete the temp file after streaming
     )
+
+
+@router.get("/runs/{run_id}/export.xlsx")
+def export_run_xlsx(run_id: int, session: Session = Depends(get_session)):
+    run = _get_done_run(run_id, session)
+    return _export_response(run, export_xlsx, ".xlsx", XLSX_MEDIA_TYPE)
 
 
 @router.get("/runs/{run_id}/export.pdf")
 def export_run_pdf(run_id: int, session: Session = Depends(get_session)):
     run = _get_done_run(run_id, session)
-    problem = problem_from_dict(run.problem_snapshot)
-    solution = solution_from_dict(run.solution)
-
-    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    tmp.close()
-    export_pdf(solution, problem, tmp.name)
-    return FileResponse(
-        tmp.name,
-        filename=f"timetable_run_{run_id}.pdf",
-        media_type=PDF_MEDIA_TYPE,
-        background=BackgroundTask(os.unlink, tmp.name),  # delete the temp file after streaming
-    )
+    return _export_response(run, export_pdf, ".pdf", PDF_MEDIA_TYPE)
 
 
 @router.get("/readiness")

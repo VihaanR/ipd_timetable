@@ -84,9 +84,16 @@ def run_generation(run_id: int) -> None:
 
 def sweep_stale_running(session: Session) -> int:
     """Startup recovery (design.md §5.3 honest-limits): `BackgroundTasks` jobs live only in this
-    process's threadpool, so a `running` row found at startup means the process died mid-solve.
-    Fail those rows so the SPA doesn't poll a run that will never finish. Returns the count swept."""
-    stale = session.exec(select(TimetableRun).where(TimetableRun.status == "running")).all()
+    process's threadpool, so a `running` OR `queued` row found at startup means the process died
+    either mid-solve or between `POST /api/runs` inserting the `queued` row and the background
+    task flipping it to `running` — nothing in a fresh process will ever pick up a leftover
+    `queued` row, so it is unambiguously an orphan too. Leaving it alone would keep `has_active_run`
+    true forever, permanently 409-ing every future `POST /api/runs` with no recovery path short of
+    editing the DB by hand. Fail both statuses so the SPA doesn't poll a run that will never finish.
+    Returns the count swept."""
+    stale = session.exec(
+        select(TimetableRun).where(TimetableRun.status.in_(["running", "queued"]))
+    ).all()
     for run in stale:
         run.status = "failed"
         run.error = "orphaned by restart"

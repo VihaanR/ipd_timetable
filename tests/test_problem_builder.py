@@ -95,6 +95,62 @@ def test_branch_ids_filter(client):
     assert len(data["time_slots"]) == 40
 
 
+def test_duplicate_division_name_across_branches_blocks_whole_institution_readiness(client):
+    """Two branches sharing a division name collide in the engine's `division_by_id()` map once
+    both are emitted into one whole-institution `ProblemInstance` (branch_ids=None) — the default
+    for `POST /api/runs`. readiness() must catch this as an issue before problem_from_dict ever
+    runs, rather than silently merging the two divisions."""
+    with Session(get_engine()) as session:
+        session.add(SlotTemplate(day=0, period=0, start="08:00", end="09:00"))
+        session.add(SlotTemplate(day=0, period=1, start="09:00", end="10:00"))
+        session.add(Room(code="CR1", name="Classroom 1", capacity=60, room_type="classroom"))
+        faculty = Faculty(code="F1", name="Faculty One")
+        session.add(faculty)
+        session.flush()
+
+        branch_a = Branch(code="A", name="Branch A")
+        branch_b = Branch(code="B", name="Branch B")
+        session.add(branch_a)
+        session.add(branch_b)
+        session.flush()
+
+        course_a = Course(branch_id=branch_a.id, code="CA", title="Course A",
+                           theory_per_week=1, category="Major")
+        course_b = Course(branch_id=branch_b.id, code="CB", title="Course B",
+                           theory_per_week=1, category="Major")
+        session.add(course_a)
+        session.add(course_b)
+        session.flush()
+
+        # Same division name "D1" in two different branches.
+        division_a = Division(branch_id=branch_a.id, name="D1", program="FYUP", semester=1,
+                               student_count=10)
+        division_b = Division(branch_id=branch_b.id, name="D1", program="FYUP", semester=1,
+                               student_count=10)
+        session.add(division_a)
+        session.add(division_b)
+        session.flush()
+
+        session.add(Allocation(division_id=division_a.id, course_id=course_a.id,
+                                faculty_id=faculty.id))
+        session.add(Allocation(division_id=division_b.id, course_id=course_b.id,
+                                faculty_id=faculty.id))
+        session.commit()
+
+        branch_a_id = branch_a.id
+
+        problem, issues = readiness(session)  # branch_ids=None -> whole institution
+
+    assert problem is None
+    assert any("division name 'D1'" in issue for issue in issues)
+
+    with Session(get_engine()) as session:
+        # Filtering to a single branch removes the collision entirely.
+        _, issues_single = readiness(session, branch_ids=[branch_a_id])
+
+    assert not any("division name 'D1'" in issue for issue in issues_single)
+
+
 def test_missing_faculty_reference_surfaces_readiness_issue(client):
     with Session(get_engine()) as session:
         branch = Branch(code="B1", name="Branch One")
