@@ -34,7 +34,7 @@ def _seed(client):
 
 def test_generate_greedy_runs_to_done(client):
     _seed(client)
-    r = client.post("/api/generate", json={"solver": "greedy", "time_limit": 3})
+    r = client.post("/api/runs", json={"solver": "greedy", "time_limit": 3})
     assert r.status_code == 200, r.text
     run_id = r.json()["run_id"]
 
@@ -47,7 +47,7 @@ def test_generate_greedy_runs_to_done(client):
 
 
 def test_generate_on_empty_db_rejected(client):
-    r = client.post("/api/generate", json={"solver": "greedy", "time_limit": 3})
+    r = client.post("/api/runs", json={"solver": "greedy", "time_limit": 3})
     assert r.status_code == 400
     detail = r.json()["detail"]
     assert isinstance(detail, list) and len(detail) > 0
@@ -71,20 +71,34 @@ def test_generate_single_flight_conflict(client):
         session.add(TimetableRun(status="running", solver="greedy", time_limit=3, problem_snapshot={}))
         session.commit()
 
-    r = client.post("/api/generate", json={"solver": "greedy", "time_limit": 3})
+    r = client.post("/api/runs", json={"solver": "greedy", "time_limit": 3})
     assert r.status_code == 409
 
 
 def test_generate_unknown_solver_rejected(client):
     _seed(client)
-    r = client.post("/api/generate", json={"solver": "banana", "time_limit": 3})
+    r = client.post("/api/runs", json={"solver": "banana", "time_limit": 3})
     assert r.status_code == 400
 
 
 def test_list_runs_after_generate(client):
     _seed(client)
-    r = client.post("/api/generate", json={"solver": "greedy", "time_limit": 3})
+    r = client.post("/api/runs", json={"solver": "greedy", "time_limit": 3})
     run_id = r.json()["run_id"]
 
     runs = client.get("/api/runs").json()
     assert any(entry["id"] == run_id for entry in runs)
+
+
+def test_legacy_generate_still_reachable(client):
+    """The DB-backed generate job now lives at POST /api/runs (see module docstring). This locks
+    in that /api/generate still resolves to the legacy in-memory showcase handler in
+    webapp/server.py (api_generate), not the new runs router - i.e. the new route no longer
+    shadows the legacy endpoint."""
+    _seed(client)
+    r = client.post("/api/generate", json={"dataset": "reference", "solver": "greedy", "time_limit": 3})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert "grids" in body
+    assert "hard_violations" in body
+    assert "run_id" not in body

@@ -29,7 +29,7 @@ class GenerateRequest(BaseModel):
     branch_ids: list[int] | None = None
 
 
-@router.post("/generate")
+@router.post("/runs")
 def generate(
     body: GenerateRequest,
     background: BackgroundTasks,
