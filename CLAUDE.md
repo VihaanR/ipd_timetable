@@ -70,11 +70,17 @@ tests/               pytest suite (engine + API TestClient tests)
 design.md            Full platform design spec (architecture, API, schema, roadmap)
 ```
 
-> **Build status:** the tree above is the target state. Today only the engine, `cli.py`,
-> benchmarks, tests, and the old two-endpoint showcase (`webapp/server.py` + `static/`) exist.
-> `db.py`, `models_db.py`, `problem_builder.py`, `jobs.py`, `seed.py`, `extract_calendar.py`,
-> `routers/`, `uploads/`, the js modules, and `timetable/disruption.py` are created in phases
-> P1–P4 (§16); `solvers/__init__.py` is currently empty and gains the registry in P0.
+> **Build status (updated 2026-07-21):** the tree above is the target state. **Done:** the engine,
+> `cli.py`, benchmarks, tests, `timetable/disruption.py`; **P0** (`solvers/__init__.py` registry,
+> port 8750, `io_json.problem_to_dict`/`save_problem`, `sync_group_id` fix); **P1** persistence +
+> CRUD (`webapp/db.py`, `models_db.py`, `routers/` = branches+divisions/faculty/courses/rooms/
+> allocations/slots + `_crud.py`, `seed.py`); **P2 backend** generate-from-DB (`problem_builder.py`,
+> `jobs.py`, `routers/runs.py` = `POST /api/runs` create-run + poll + history + `GET /api/readiness`
+> + xlsx/pdf export). **Not yet built:** `extract_calendar.py` + calendar/adjust routers (P3/P4-web),
+> the SPA `js/api.js`/`js/pages/*` wizard (still the old two-endpoint showcase in `static/`), the
+> DJSCE light theme (P5), and the design-change decisions (disruption full re-solve, compare mode,
+> undo — see design.md §7/§5.3/§16). **Note:** the DB-backed generate lives at `POST /api/runs`
+> (not `/api/generate`, which stays the legacy in-memory showcase endpoint until the SPA retires it).
 
 **Engine data flow:** `ProblemInstance` → `expand_requirements()` → ordered
 `list[SessionRequirement]` → *(solver)* → `Solution` (list of `Assignment`) →

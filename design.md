@@ -210,7 +210,7 @@ re-seeds).
 | `GET /api/runs/{id}` | `{status, hard, soft, grids, stage_reports, error}` — UI polls every 2 s |
 | `GET /api/runs` | Run history (id, label, solver, status, scores, created_at) |
 | `GET /api/runs/{id}/export.xlsx` / `.pdf` | Reconstructs `ProblemInstance` from the snapshot + solution and calls the existing `export.py` |
-| `POST /api/runs {solver: "compare", solvers: ["cpsat","pipeline","greedy"], time_limit, label?}` | **New (2026-07-21, revised same day to add solver selection).** Runs each solver named in `solvers` on the same problem snapshot in one job; the run row stores one solution/grid/score per selected solver, keyed by name. UI renders a comparison table (`hard`/`soft`/`wall_clock_seconds` per solver) plus tabs to view each grid — the live version of the CLAUDE.md §13 benchmark table |
+| `POST /api/runs {solver: "compare", solvers: ["cpsat","pipeline","greedy"], time_limit, label?}` | **⚠️ DESIGN-ONLY — NOT YET IMPLEMENTED (as of P2, 2026-07-21).** The as-built `POST /api/runs` accepts a single `solver` (`pipeline` or a `SOLVERS` key) and rejects `"compare"` with 400; the request model has no `solvers` field. **When built (a "design-change decisions" task, separate from P2):** runs each solver named in `solvers` on the same problem snapshot in one job; the run row stores one solution/grid/score per selected solver, keyed by name; UI renders a comparison table (`hard`/`soft`/`wall_clock_seconds` per solver) plus tabs to view each grid — the live version of the CLAUDE.md §13 benchmark table |
 
 The solver code is synchronous; a background task with a sync function runs in Starlette's
 threadpool, so the event loop stays responsive. **Solver choices exposed (revised 2026-07-21):**
