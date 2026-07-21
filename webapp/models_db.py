@@ -12,6 +12,7 @@ The base doubles as the response schema.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import JSON, Column
@@ -185,3 +186,25 @@ class SlotTemplate(SlotTemplateBase, table=True):
 
 class SlotTemplateCreate(SlotTemplateBase):
     pass
+
+
+# --------------------------------------------------------------------------- timetable_run (P2)
+class TimetableRun(SQLModel, table=True):
+    """A generate job record (design.md §4.2). `problem_snapshot` makes the run reproducible
+    (and is what `disruption.replan` will consume once P4's persistence lands); `solution`/
+    `grids`/`stage_reports` are populated by `webapp.jobs.run_generation` once the background
+    solve finishes. `status` moves queued -> running -> done/failed."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    label: str = ""
+    solver: str
+    time_limit: float
+    status: str = "queued"
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    problem_snapshot: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    solution: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    grids: Optional[dict] = Field(default=None, sa_column=Column(JSON))
+    stage_reports: Optional[list] = Field(default=None, sa_column=Column(JSON))
+    hard: Optional[int] = None
+    soft: Optional[float] = None
+    error: Optional[str] = None
