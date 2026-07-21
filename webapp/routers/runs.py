@@ -8,12 +8,14 @@ institution's shared rooms/faculty, so only one run may be queued/running at a t
 """
 from __future__ import annotations
 
+import os
 import tempfile
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
+from starlette.background import BackgroundTask
 
 from timetable.export import export_pdf, export_xlsx
 from timetable.io_json import problem_from_dict, problem_to_dict, solution_from_dict
@@ -127,6 +129,7 @@ def export_run_xlsx(run_id: int, session: Session = Depends(get_session)):
         tmp.name,
         filename=f"timetable_run_{run_id}.xlsx",
         media_type=XLSX_MEDIA_TYPE,
+        background=BackgroundTask(os.unlink, tmp.name),  # delete the temp file after streaming
     )
 
 
@@ -143,6 +146,7 @@ def export_run_pdf(run_id: int, session: Session = Depends(get_session)):
         tmp.name,
         filename=f"timetable_run_{run_id}.pdf",
         media_type=PDF_MEDIA_TYPE,
+        background=BackgroundTask(os.unlink, tmp.name),  # delete the temp file after streaming
     )
 
 
