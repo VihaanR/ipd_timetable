@@ -1,0 +1,104 @@
+"""Shared candidate-slot/room generation, used by GA and CP-SAT (mirrors the pruning logic in
+mip.py so all solvers agree on what counts as a structurally-valid placement)."""
+from __future__ import annotations
+
+from timetable.models import ProblemInstance, SessionRequirement
+
+NO_ROOM = "NONE"
+
+
+def slots_by_day(problem: ProblemInstance) -> dict[int, list]:
+    out: dict[int, list] = {}
+    for t in problem.time_slots:
+        out.setdefault(t.day, []).append(t)
+    for day in out:
+        out[day].sort(key=lambda t: t.period)
+    return out
+
+
+def consecutive_slot_ids(day_slots: list, start_idx: int, duration: int) -> list[int] | None:
+    if start_idx + duration > len(day_slots):
+        return None
+    window = day_slots[start_idx:start_idx + duration]
+    for a, b in zip(window, window[1:]):
+        if b.period != a.period + 1:
+            return None
+    return [t.id for t in window]
+
+
+def batch_group_members(requirements: list[SessionRequirement]) -> dict[str, list[SessionRequirement]]:
+    groups: dict[str, list[SessionRequirement]] = {}
+    for r in requirements:
+        if r.batch_group_id:
+            groups.setdefault(r.batch_group_id, []).append(r)
+    return groups
+
+
+def sync_group_members(requirements: list[SessionRequirement]) -> dict[str, list[SessionRequirement]]:
+    groups: dict[str, list[SessionRequirement]] = {}
+    for r in requirements:
+        if r.sync_group_id:
+            groups.setdefault(r.sync_group_id, []).append(r)
+    return groups
+
+
+def room_options_for(req: SessionRequirement, problem: ProblemInstance,
+                      groups: dict[str, list[SessionRequirement]]) -> list[str]:
+    classrooms = [r.id for r in problem.rooms if r.room_type == "classroom"]
+    labs = [r.id for r in problem.rooms if r.room_type == "lab"]
+    if req.room_type == "none":
+        return [NO_ROOM]
+    if req.room_type == "lab":
+        if req.batch_group_id:
+            members = groups.get(req.batch_group_id, [req])
+            idx = members.index(req) if req in members else 0
+            partitioned = [rid for i, rid in enumerate(labs) if i % 2 == idx % 2]
+            return partitioned or list(labs)
+        return list(labs)
+    return list(classrooms)
+
+
+def build_candidates(problem: ProblemInstance,
+                      requirements: list[SessionRequirement]) -> dict[str, list[tuple[int, list[int], int, str]]]:
+    """req.id -> list of (start_slot_id, occupied_slot_ids, day, room_id)."""
+    days = slots_by_day(problem)
+    groups = batch_group_members(requirements)
+    faculty_by_id = problem.faculty_by_id()
+    divisions_by_id = problem.division_by_id()
+    rooms_by_id = problem.room_by_id()
+    out: dict[str, list[tuple[int, list[int], int, str]]] = {}
+
+    for req in requirements:
+        room_options = room_options_for(req, problem, groups)
+        division = divisions_by_id.get(req.division_id)
+        occupants = (division.student_count // 2) if (req.batch_id and division) else (division.student_count if division else 0)
+        cands: list[tuple[int, list[int], int, str]] = []
+        for day, day_slots in days.items():
+            if req.fixed_day is not None and day != req.fixed_day:
+                continue
+            for start_idx, ts in enumerate(day_slots):
+                occ_ids = consecutive_slot_ids(day_slots, start_idx, req.duration_slots)
+                if occ_ids is None:
+                    continue
+                # break must sit in the mid-day band: not first two periods, not last period
+                if req.is_break and (start_idx <= 1 or start_idx == len(day_slots) - 1):
+                    continue
+                # nothing may be scheduled into a blocked slot (disruption window); breaks are
+                # exempt (a blocked slot is simply untaught, which a break already represents)
+                if problem.blocked_slot_ids and not req.is_break \
+                        and any(sid in problem.blocked_slot_ids for sid in occ_ids):
+                    continue
+                if req.fixed_time_slot_id is not None and ts.id != req.fixed_time_slot_id:
+                    continue
+                if req.faculty_id:
+                    fac = faculty_by_id.get(req.faculty_id)
+                    if fac and any(sid in fac.unavailable_slots for sid in occ_ids):
+                        continue
+                for room_id in room_options:
+                    if room_id != NO_ROOM:
+                        room = rooms_by_id[room_id]
+                        if room.capacity < occupants:
+                            continue
+                    cands.append((ts.id, occ_ids, day, room_id))
+        out[req.id] = cands
+    return out

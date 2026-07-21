@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "timetable-web",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "uvicorn", "webapp.server:app", "--host", "127.0.0.1", "--port", "8750"],
+      "port": 8750
+    }
+  ]
+}
