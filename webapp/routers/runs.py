@@ -1,10 +1,10 @@
 """Generate job + poll + history (design.md §5.3, CLAUDE.md §11).
 
-`POST /api/generate` builds and validates the `ProblemInstance` snapshot synchronously (the
-readiness gate is cheap - no solving happens yet), stores it as `problem_snapshot`, then hands the
-actual solve off to `BackgroundTasks` (`webapp.jobs.run_generation`) so the request returns
-immediately with a `run_id` the SPA polls via `GET /api/runs/{id}`. Single-flight: solves cover the
-whole institution's shared rooms/faculty, so only one run may be queued/running at a time.
+`POST /api/runs` builds and validates the `ProblemInstance` snapshot synchronously (the readiness
+gate is cheap - no solving happens yet), stores it as `problem_snapshot`, then hands the actual
+solve off to `BackgroundTasks` (`webapp.jobs.run_generation`) so the request returns immediately
+with a `run_id` the SPA polls via `GET /api/runs/{id}`. Single-flight: solves cover the whole
+institution's shared rooms/faculty, so only one run may be queued/running at a time.
 """
 from __future__ import annotations
 

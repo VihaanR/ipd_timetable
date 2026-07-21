@@ -83,7 +83,7 @@ FastAPI (port 8750)
         expand_requirements → solvers/pipeline → Solution → scoring / view / export
 ```
 
-**Request lifecycle — Generate:** UI `POST /api/generate` → server snapshots the DB into a
+**Request lifecycle — Generate:** UI `POST /api/runs` → server snapshots the DB into a
 problem dict (stored on the run row), inserts `timetable_run(status=queued)`, schedules a
 background task, returns `{run_id}` immediately → task runs the pipeline in the threadpool,
 writes solution + grids + stage reports + scores onto the row → UI polls `GET /api/runs/{id}`
@@ -206,11 +206,11 @@ re-seeds).
 
 | Route | Behavior |
 |-------|----------|
-| `POST /api/generate` `{solver, time_limit, label?}` | Builds + validates the problem dict (400 with the validation list if not ready), stores it as `problem_snapshot`, inserts `timetable_run(status=queued)`, schedules the background task, returns `{run_id}` **immediately**. Rejects with 409 if a run is already `running` (single-flight guard) |
+| `POST /api/runs` `{solver, time_limit, label?, branch_ids?}` | Builds + validates the problem dict (400 with the validation list if not ready), stores it as `problem_snapshot`, inserts `timetable_run(status=queued)`, schedules the background task, returns `{run_id}` **immediately**. Rejects with 409 if a run is already `running` (single-flight guard). **Path note (2026-07-21 impl):** the DB-backed generate lives at `POST /api/runs` (create-run), not `/api/generate` — the latter stays the legacy in-memory showcase endpoint until the SPA Generate page retires it |
 | `GET /api/runs/{id}` | `{status, hard, soft, grids, stage_reports, error}` — UI polls every 2 s |
 | `GET /api/runs` | Run history (id, label, solver, status, scores, created_at) |
 | `GET /api/runs/{id}/export.xlsx` / `.pdf` | Reconstructs `ProblemInstance` from the snapshot + solution and calls the existing `export.py` |
-| `POST /api/generate {solver: "compare", solvers: ["cpsat","pipeline","greedy"], time_limit, label?}` | **New (2026-07-21, revised same day to add solver selection).** Runs each solver named in `solvers` on the same problem snapshot in one job; the run row stores one solution/grid/score per selected solver, keyed by name. UI renders a comparison table (`hard`/`soft`/`wall_clock_seconds` per solver) plus tabs to view each grid — the live version of the CLAUDE.md §13 benchmark table |
+| `POST /api/runs {solver: "compare", solvers: ["cpsat","pipeline","greedy"], time_limit, label?}` | **New (2026-07-21, revised same day to add solver selection).** Runs each solver named in `solvers` on the same problem snapshot in one job; the run row stores one solution/grid/score per selected solver, keyed by name. UI renders a comparison table (`hard`/`soft`/`wall_clock_seconds` per solver) plus tabs to view each grid — the live version of the CLAUDE.md §13 benchmark table |
 
 The solver code is synchronous; a background task with a sync function runs in Starlette's
 threadpool, so the event loop stays responsive. **Solver choices exposed (revised 2026-07-21):**
@@ -295,7 +295,7 @@ in exchange for "nothing is silently lost."
 1. `replan()` no longer copies undisrupted days verbatim by default. Instead: `blocked_slot_ids`
    is set to the disruption window, `relaxed_days` covers the affected day (so its day-shaped hard
    rules don't falsely trip), and the **whole problem is resolved end-to-end** — same mechanism as
-   a normal `POST /api/generate`, just with those two fields set on the snapshot.
+   a normal `POST /api/runs`, just with those two fields set on the snapshot.
 2. **Warm start from the baseline solution is kept** (this part of the old design was already
    correct and stays): `AddHint`/`SetHint` biases the new solve toward the previous placement, so
    in practice most unaffected sessions *do* end up back where they were — but this is now an
@@ -557,7 +557,7 @@ Each extends an existing module; none creates a new subsystem to maintain:
 - **DB:** change the SQLModel connection URL from SQLite to managed Postgres; models unchanged;
   adopt Alembic at that point.
 - **Jobs:** replace BackgroundTasks scheduling with a worker (RQ/arq) behind the **same**
-  `/api/generate` → `/api/runs/{id}` contract.
+  `/api/runs` → `/api/runs/{id}` contract.
 - **Files:** `webapp/uploads/` → object storage behind the same upload/serve endpoints.
 - **Serving:** uvicorn behind a reverse proxy; the SPA is already static files.
 - **Then and only then:** authentication and multi-tenancy (still deferred).

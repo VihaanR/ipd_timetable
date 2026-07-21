@@ -1,4 +1,4 @@
-"""Background job runner for `POST /api/generate` (design.md §5.3, CLAUDE.md §11).
+"""Background job runner for `POST /api/runs` (design.md §5.3, CLAUDE.md §11).
 
 `run_generation` is handed to Starlette's `BackgroundTasks`, which executes it in a threadpool
 *after* the request has already returned its response — so it cannot reuse the request's DB
@@ -97,7 +97,7 @@ def sweep_stale_running(session: Session) -> int:
 
 
 def has_active_run(session: Session) -> bool:
-    """True if a run is queued or running — the single-flight guard for `POST /api/generate`."""
+    """True if a run is queued or running — the single-flight guard for `POST /api/runs`."""
     active = session.exec(
         select(TimetableRun).where(TimetableRun.status.in_(["queued", "running"]))
     ).first()
