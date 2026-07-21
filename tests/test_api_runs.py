@@ -90,6 +90,51 @@ def test_list_runs_after_generate(client):
     assert any(entry["id"] == run_id for entry in runs)
 
 
+def test_export_xlsx_of_done_run(client):
+    _seed(client)
+    run_id = client.post("/api/runs", json={"solver": "greedy", "time_limit": 3}).json()["run_id"]
+
+    r = client.get(f"/api/runs/{run_id}/export.xlsx")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert len(r.content) > 0
+
+
+def test_export_pdf_of_done_run(client):
+    _seed(client)
+    run_id = client.post("/api/runs", json={"solver": "greedy", "time_limit": 3}).json()["run_id"]
+
+    r = client.get(f"/api/runs/{run_id}/export.pdf")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/pdf"
+    assert len(r.content) > 0
+
+
+def test_export_missing_run_404(client):
+    r = client.get("/api/runs/999999/export.xlsx")
+    assert r.status_code == 404
+
+    r = client.get("/api/runs/999999/export.pdf")
+    assert r.status_code == 404
+
+
+def test_export_not_done_run_409(client):
+    with Session(get_engine()) as session:
+        run = TimetableRun(status="queued", solver="greedy", time_limit=3, problem_snapshot={})
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+        run_id = run.id
+
+    r = client.get(f"/api/runs/{run_id}/export.xlsx")
+    assert r.status_code == 409
+
+    r = client.get(f"/api/runs/{run_id}/export.pdf")
+    assert r.status_code == 409
+
+
 def test_legacy_generate_still_reachable(client):
     """The DB-backed generate job now lives at POST /api/runs (see module docstring). This locks
     in that /api/generate still resolves to the legacy in-memory showcase handler in

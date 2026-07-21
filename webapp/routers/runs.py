@@ -8,16 +8,23 @@ institution's shared rooms/faculty, so only one run may be queued/running at a t
 """
 from __future__ import annotations
 
+import tempfile
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlmodel import Session, select
 
-from timetable.io_json import problem_to_dict
+from timetable.export import export_pdf, export_xlsx
+from timetable.io_json import problem_from_dict, problem_to_dict, solution_from_dict
 from timetable.solvers import SOLVERS
 from webapp.db import get_session
 from webapp.jobs import has_active_run, run_generation
 from webapp.models_db import TimetableRun
 from webapp.problem_builder import readiness
+
+XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+PDF_MEDIA_TYPE = "application/pdf"
 
 router = APIRouter(prefix="/api", tags=["runs"])
 
@@ -94,6 +101,49 @@ def get_run(run_id: int, session: Session = Depends(get_session)):
         "error": run.error,
         "created_at": run.created_at,
     }
+
+
+def _get_done_run(run_id: int, session: Session) -> TimetableRun:
+    """Shared lookup for the export routes: 404 if the run doesn't exist, 409 if it hasn't
+    finished solving yet (nothing to export)."""
+    run = session.get(TimetableRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"run {run_id} not found")
+    if run.status != "done":
+        raise HTTPException(status_code=409, detail=f"run {run_id} is not done (status={run.status!r})")
+    return run
+
+
+@router.get("/runs/{run_id}/export.xlsx")
+def export_run_xlsx(run_id: int, session: Session = Depends(get_session)):
+    run = _get_done_run(run_id, session)
+    problem = problem_from_dict(run.problem_snapshot)
+    solution = solution_from_dict(run.solution)
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
+    tmp.close()
+    export_xlsx(solution, problem, tmp.name)
+    return FileResponse(
+        tmp.name,
+        filename=f"timetable_run_{run_id}.xlsx",
+        media_type=XLSX_MEDIA_TYPE,
+    )
+
+
+@router.get("/runs/{run_id}/export.pdf")
+def export_run_pdf(run_id: int, session: Session = Depends(get_session)):
+    run = _get_done_run(run_id, session)
+    problem = problem_from_dict(run.problem_snapshot)
+    solution = solution_from_dict(run.solution)
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+    tmp.close()
+    export_pdf(solution, problem, tmp.name)
+    return FileResponse(
+        tmp.name,
+        filename=f"timetable_run_{run_id}.pdf",
+        media_type=PDF_MEDIA_TYPE,
+    )
 
 
 @router.get("/readiness")
