@@ -236,7 +236,8 @@ this API contract** — that is the "enhance, don't add maintenance surface" pos
 
 | Route | Behavior |
 |-------|----------|
-| `POST /api/adjust` `{run_id, date, scope: "whole_day" \| {from_period: N}, reason}` | Same job pattern; date's weekday + scope → `affected_slot_ids`; runs the disruption engine (§7); writes an `adjustment` row |
+| `POST /api/runs/{run_id}/adjust` `{day, from_period?, reason?}` | **✅ IMPLEMENTED (P4-web, 2026-07-21).** Reconstructs the stored run's problem snapshot + baseline solution, blocks the disrupted window (whole-day holiday if `from_period` omitted, else rain from period N), runs the minimal-change patcher (`disruption.replan`), and returns the adjusted grids + moved/dropped diff. **Stateless overlay — the stored run is never mutated** (no `adjustment` row persisted yet; the frontend `/platform` "Restore original" reverts client-side). Wired into the `/platform` Adjust panel. Still the minimal-change patcher (drops sessions it can't relocate within the day); the full re-solve is the §7 follow-up |
+| `POST /api/adjust` `{day, from_period?}` | **Legacy showcase** disruption against the in-memory `_LAST` baseline (old two-endpoint page at `/`). Superseded by the run-scoped endpoint above for the DB platform |
 | `GET /api/adjustments?run_id=` | List overlays for a run (each row tagged `status: "active"` \| `"reverted"`, §7 undo) |
 | `GET /api/adjustments/{id}` | Grids + `moved_sessions` diff |
 | `GET /api/adjustments/{id}/export.xlsx` / `.pdf` | Export of the adjusted day/week |
@@ -688,10 +689,16 @@ one actually happens, not every day.
 
 ---
 
-## 16. Scoring Refinements — Break Placement & Day-Span (design decision, not yet implemented)
+## 16. Scoring Refinements — Break Placement & Day-Span — ✅ IMPLEMENTED
 
-**Status: decision recorded 2026-07-21; `timetable/scoring.py` is unchanged so far — this is scope
-for a dedicated implementation pass, not a description of current code.**
+**Status: IMPLEMENTED 2026-07-21.** `scoring.py` now (a) rotates the `break_not_midmorning` target
+through the legal mid-day band by day index so breaks spread across the week, and (b) adds a
+`day_span` soft term (weight 2.0) penalizing a division's occupied span beyond `COMPACT_DAY_SPAN`
+(=7, i.e. 6h min load + 1 break). Both are mirrored in the CP-SAT objective (`cpsat.py`:
+per-day break target + `DAY_SPAN_WEIGHT=40` on late-tail occupied periods); GA inherits them via
+`scoring.score()`. Verified on the reference dataset: CP-SAT breaks vary `[2,3,4,5,6]` Mon–Fri at
+`hard=0`. Regression tests added to `tests/test_breaks.py` (break-variety + day-span-is-scored).
+The original design write-up is retained below for rationale.
 
 **Observation that prompted this:** the greedy solver already varies the break's period across a
 division's five days (`greedy.py:143-157` rotates through mid-day candidates via `day %

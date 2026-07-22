@@ -76,11 +76,15 @@ design.md            Full platform design spec (architecture, API, schema, roadm
 > CRUD (`webapp/db.py`, `models_db.py`, `routers/` = branches+divisions/faculty/courses/rooms/
 > allocations/slots + `_crud.py`, `seed.py`); **P2 backend** generate-from-DB (`problem_builder.py`,
 > `jobs.py`, `routers/runs.py` = `POST /api/runs` create-run + poll + history + `GET /api/readiness`
-> + xlsx/pdf export). **Not yet built:** `extract_calendar.py` + calendar/adjust routers (P3/P4-web),
-> the SPA `js/api.js`/`js/pages/*` wizard (still the old two-endpoint showcase in `static/`), the
-> DJSCE light theme (P5), and the design-change decisions (disruption full re-solve, compare mode,
-> undo — see design.md §7/§5.3/§16). **Note:** the DB-backed generate lives at `POST /api/runs`
-> (not `/api/generate`, which stays the legacy in-memory showcase endpoint until the SPA retires it).
+> + xlsx/pdf export + `POST /api/runs/{id}/adjust` holiday/rain overlay); a **`/platform` SPA page**
+> (`static/platform.html`+`platform.js`) driving seed→readiness→generate→view→export→adjust; and the
+> **§16 scoring refinements** (per-day break variety + `day_span` compact-day term, in `scoring.py` +
+> mirrored in `cpsat.py`). **Not yet built:** entity-CRUD frontend forms (faculty/subjects/etc. are
+> API-only — no data-entry UI), `extract_calendar.py` + calendar router (P3), the DJSCE light theme
+> (P5), and the remaining design-change decisions (disruption **full re-solve** — `/adjust` is still
+> the minimal-change patcher that drops un-relocatable sessions — plus compare mode + undo; see
+> design.md §7/§5.3). **Note:** DB-backed generate lives at `POST /api/runs` (not `/api/generate`,
+> the legacy in-memory showcase at `/`). The DB-backed adjust is `POST /api/runs/{id}/adjust`.
 
 **Engine data flow:** `ProblemInstance` → `expand_requirements()` → ordered
 `list[SessionRequirement]` → *(solver)* → `Solution` (list of `Assignment`) →
