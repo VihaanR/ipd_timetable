@@ -17,13 +17,17 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 from starlette.background import BackgroundTask
 
+from timetable.disruption import affected_slots_for_day, replan
 from timetable.export import export_pdf, export_xlsx
 from timetable.io_json import problem_from_dict, problem_to_dict, solution_from_dict
 from timetable.solvers import SOLVERS
+from timetable.view import solution_to_grids
 from webapp.db import get_session
 from webapp.jobs import has_active_run, run_generation
 from webapp.models_db import TimetableRun
 from webapp.problem_builder import readiness
+
+DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
 XLSX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 PDF_MEDIA_TYPE = "application/pdf"
@@ -154,6 +158,56 @@ def export_run_xlsx(run_id: int, session: Session = Depends(get_session)):
 def export_run_pdf(run_id: int, session: Session = Depends(get_session)):
     run = _get_done_run(run_id, session)
     return _export_response(run, export_pdf, ".pdf", PDF_MEDIA_TYPE)
+
+
+class AdjustRunRequest(BaseModel):
+    day: int                          # 0=Mon .. 4=Fri — the disrupted weekday
+    from_period: int | None = None    # None => whole-day holiday; N => rain from period N onward
+    reason: str = ""                  # "holiday" | "rain" | free text (annotation only)
+
+
+@router.post("/runs/{run_id}/adjust")
+def adjust_run(run_id: int, body: AdjustRunRequest, session: Session = Depends(get_session)):
+    """Disruption re-plan against a stored run (design.md §7). Loads the run's problem snapshot +
+    baseline solution, blocks the disrupted window, and returns a minimal-change overlay: unaffected
+    days are kept verbatim, displaced sessions are relocated within the disrupted day where they fit,
+    and any that don't are reported as dropped. The stored run is never mutated (stateless overlay)."""
+    run = _get_done_run(run_id, session)
+    problem = problem_from_dict(run.problem_snapshot)
+    baseline = solution_from_dict(run.solution)
+    if not (0 <= body.day < problem.days_per_week):
+        raise HTTPException(status_code=400, detail=f"day must be 0..{problem.days_per_week - 1}")
+
+    affected = affected_slots_for_day(problem, body.day, from_period=body.from_period)
+    result = replan(problem, baseline, affected)
+
+    grids = solution_to_grids(result.solution, problem)
+    moved = [
+        {
+            "session_id": m.session_id,
+            "from_slot": m.from_slot_id, "to_slot": m.to_slot_id,
+            "from_room": m.from_room_id, "to_room": m.to_room_id,
+            "dropped": m.to_slot_id is None,
+        }
+        for m in result.moved_sessions
+    ]
+    scope = "whole day (holiday)" if body.from_period is None else f"from period {body.from_period} (rain)"
+    return {
+        "run_id": run_id,
+        "disrupted_day": DAY_NAMES[body.day] if body.day < len(DAY_NAMES) else str(body.day),
+        "scope": scope,
+        "reason": body.reason,
+        "affected_slot_ids": sorted(affected),
+        "moved_count": len([m for m in moved if not m["dropped"]]),
+        "dropped_count": len(result.dropped_session_ids),
+        "dropped_session_ids": result.dropped_session_ids,
+        "conflict_violations": result.conflict_violations,
+        "is_valid": result.is_valid,
+        "soft_cost": round(result.soft_cost, 1),
+        "notes": result.notes,
+        "moved": moved,
+        "grids": grids,
+    }
 
 
 @router.get("/readiness")

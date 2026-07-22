@@ -85,8 +85,41 @@
     </section>
   </section>
 
+  <section class="panel-section" id="adjustSection" style="display:none">
+    <h2>5. Holiday / rain adjustment</h2>
+    <p class="notes">Adjust the current timetable (run <span id="adjustRunId">—</span>) for a sudden holiday or
+      rain. Unaffected days stay put; sessions in the blocked window are relocated within the day where they
+      fit, otherwise dropped for that occurrence. The stored run is never changed.</p>
+    <div class="controls">
+      <div class="control">
+        <label>Day</label>
+        <select id="adjDay">
+          <option value="0">Monday</option>
+          <option value="1">Tuesday</option>
+          <option value="2">Wednesday</option>
+          <option value="3">Thursday</option>
+          <option value="4">Friday</option>
+        </select>
+      </div>
+      <div class="control">
+        <label>Scope</label>
+        <select id="adjScope">
+          <option value="whole">Whole day (holiday)</option>
+          <option value="from">Rain — from period…</option>
+        </select>
+      </div>
+      <div class="control" id="adjFromWrap" style="display:none">
+        <label>From period (0-based)</label>
+        <input type="number" id="adjFrom" value="5" min="1" max="12" step="1">
+      </div>
+      <button id="adjustBtn">Apply adjustment</button>
+      <button id="restoreBtn" class="secondary" style="display:none">Restore original</button>
+    </div>
+    <div class="status-line" id="adjStatus"></div>
+  </section>
+
   <section class="panel-section" id="historySection">
-    <h2>5. History</h2>
+    <h2>6. History</h2>
     <table class="tt history-table" id="historyTable">
       <thead>
         <tr><th>ID</th><th>Label</th><th>Solver</th><th>Status</th><th>Hard</th><th>Soft</th><th>Created</th></tr>

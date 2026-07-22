@@ -10,9 +10,16 @@ let currentGrids = null;
 let activeDivision = 0;
 let currentRunId = null;
 let pollTimer = null;
+let originalGrids = null;          // the un-adjusted run grids, so "Restore original" can revert
+let movedIds = new Set();          // session ids relocated by the last adjustment (for highlighting)
 
 $("seedBtn").addEventListener("click", loadSeed);
 $("generateBtn").addEventListener("click", generate);
+$("adjustBtn").addEventListener("click", adjust);
+$("restoreBtn").addEventListener("click", restoreOriginal);
+$("adjScope").addEventListener("change", () => {
+  $("adjFromWrap").style.display = $("adjScope").value === "from" ? "" : "none";
+});
 
 // ---------------------------------------------------------------- 1. starter data
 async function loadSeed() {
@@ -140,11 +147,18 @@ function pollRun(runId) {
         renderSummary(run);
         renderStages(run.stage_reports);
         currentGrids = run.grids;
+        originalGrids = run.grids;
+        movedIds = new Set();
         activeDivision = 0;
         renderTabs();
         renderGrid();
         $("legend").style.display = "flex";
         enableExport(runId);
+        // reveal the disruption panel now that there's a baseline timetable to adjust
+        $("adjustSection").style.display = "";
+        $("adjustRunId").textContent = "#" + runId;
+        $("restoreBtn").style.display = "none";
+        $("adjStatus").textContent = "";
       } else {
         $("genStatus").textContent = `run #${runId} failed: ${run.error || "unknown error"}`;
       }
@@ -252,7 +266,8 @@ function renderGrid() {
         cell.className = "cell";
         entries.forEach((e) => {
           const s = document.createElement("div");
-          s.className = "session " + (TYPE_CLASS[e.type] || "theory");
+          s.className = "session " + (TYPE_CLASS[e.type] || "theory") +
+            (movedIds.has(e.session_id) ? " moved" : "");
           if (e.is_break) {
             s.innerHTML = `<div class="s-course">BREAK</div>`;
           } else {
@@ -276,7 +291,59 @@ function renderGrid() {
   $("gridArea").appendChild(table);
 }
 
-// ---------------------------------------------------------------- 5. history
+// ---------------------------------------------------------------- 5. holiday / rain adjustment
+async function adjust() {
+  if (!currentRunId) return;
+  const btn = $("adjustBtn");
+  btn.disabled = true;
+  $("adjStatus").textContent = "adjusting…";
+  const scope = $("adjScope").value;
+  const payload = {
+    day: parseInt($("adjDay").value, 10),
+    from_period: scope === "from" ? (parseInt($("adjFrom").value, 10) || 0) : null,
+    reason: scope === "from" ? "rain" : "holiday",
+  };
+  try {
+    const res = await fetch(`/api/runs/${currentRunId}/adjust`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error("HTTP " + res.status + " — " + text.slice(0, 200));
+    }
+    const d = await res.json();
+    movedIds = new Set(d.moved.filter((m) => !m.dropped).map((m) => m.session_id));
+    currentGrids = d.grids;
+    renderTabs();
+    renderGrid();
+    const dropped = d.dropped_count
+      ? `, ${d.dropped_count} dropped (rained out)`
+      : "";
+    $("adjStatus").innerHTML =
+      `Adjusted: <b>${d.disrupted_day}</b>, ${d.scope} — ` +
+      `${d.moved_count} session(s) moved${dropped}. ` +
+      `Moved sessions are highlighted below.`;
+    $("restoreBtn").style.display = "";
+  } catch (e) {
+    $("adjStatus").textContent = "error: " + (e.message || e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function restoreOriginal() {
+  if (!originalGrids) return;
+  currentGrids = originalGrids;
+  movedIds = new Set();
+  renderTabs();
+  renderGrid();
+  $("adjStatus").textContent = "restored the original (un-adjusted) timetable.";
+  $("restoreBtn").style.display = "none";
+}
+
+// ---------------------------------------------------------------- 6. history
 async function loadHistory() {
   try {
     const res = await fetch("/api/runs");

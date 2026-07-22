@@ -176,3 +176,27 @@ def test_legacy_generate_still_reachable(client):
     assert "grids" in body
     assert "hard_violations" in body
     assert "run_id" not in body
+
+
+def test_adjust_run_returns_overlay(client):
+    _seed(client)
+    run_id = client.post("/api/runs", json={"solver": "greedy", "time_limit": 3}).json()["run_id"]
+    # rain from period 5 on Tuesday (day 1)
+    r = client.post(f"/api/runs/{run_id}/adjust", json={"day": 1, "from_period": 5, "reason": "rain"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["disrupted_day"] == "Tuesday"
+    assert body["grids"] and body["grids"]["divisions"]
+    assert isinstance(body["moved"], list)
+    assert len(body["affected_slot_ids"]) > 0  # a from-period cut blocks the tail of the day
+
+
+def test_adjust_run_validates_day_and_status(client):
+    _seed(client)
+    run_id = client.post("/api/runs", json={"solver": "greedy", "time_limit": 3}).json()["run_id"]
+    assert client.post(f"/api/runs/{run_id}/adjust", json={"day": 9}).status_code == 400   # bad day
+    assert client.post("/api/runs/9999/adjust", json={"day": 0}).status_code == 404          # missing run
+    with Session(get_engine()) as s:
+        s.add(TimetableRun(id=555, status="queued", solver="greedy", time_limit=3, problem_snapshot={}))
+        s.commit()
+    assert client.post("/api/runs/555/adjust", json={"day": 0}).status_code == 409            # not done
