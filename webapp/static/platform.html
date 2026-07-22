@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DJ Sanghvi Timetable Platform</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">TT</div>
+    <div>
+      <h1>DJ Sanghvi Timetable Platform</h1>
+      <p class="sub">Database-backed generate &middot; SIH 25091</p>
+    </div>
+  </div>
+  <div class="dataset-label" id="topLabel">P2 generate-from-DB</div>
+</header>
+
+<main>
+
+  <section class="panel-section" id="seedSection">
+    <h2>1. Starter data</h2>
+    <div class="control-row">
+      <button id="seedBtn">Load reference data</button>
+      <span class="status-line" id="seedStatus">not loaded yet</span>
+    </div>
+  </section>
+
+  <section class="panel-section" id="readySection">
+    <h2>2. Readiness</h2>
+    <div class="readiness-banner" id="readyBanner">checking…</div>
+  </section>
+
+  <section class="panel-section" id="genSection">
+    <h2>3. Generate</h2>
+    <div class="controls">
+      <div class="control">
+        <label>Solver</label>
+        <select id="solver">
+          <option value="greedy">Greedy — instant</option>
+          <option value="cpsat">CP-SAT — best quality, slower</option>
+          <option value="pipeline">Hybrid pipeline — slower</option>
+        </select>
+      </div>
+      <div class="control">
+        <label>Time limit (s)</label>
+        <input type="number" id="timeLimit" value="30" min="2" max="600" step="5">
+      </div>
+      <button id="generateBtn">Generate</button>
+    </div>
+    <p class="notes" id="genNote">cpsat / pipeline can take significantly longer than greedy.</p>
+    <div class="status-line" id="genStatus"></div>
+  </section>
+
+  <section class="panel-section" id="resultSection">
+    <h2>4. Result</h2>
+    <div class="summary" id="summary" style="display:none">
+      <div class="stat"><span class="stat-val" id="statSolver">—</span><span class="stat-lbl">solver</span></div>
+      <div class="stat"><span class="stat-val" id="statStatus">—</span><span class="stat-lbl">status</span></div>
+      <div class="stat"><span class="stat-val" id="statHard">—</span><span class="stat-lbl">hard violations</span></div>
+      <div class="stat"><span class="stat-val" id="statSoft">—</span><span class="stat-lbl">soft cost</span></div>
+      <div class="stat"><span class="stat-val" id="statWall">—</span><span class="stat-lbl">wall clock</span></div>
+    </div>
+
+    <div class="stages" id="stagesWrap" style="display:none">
+      <h2>Hybrid pipeline stages</h2>
+      <div class="stage-track" id="stageTrack"></div>
+    </div>
+
+    <div class="export-row" id="exportRow" style="display:none">
+      <a id="exportXlsx" class="export-link" href="#" target="_blank" rel="noopener">Export Excel (.xlsx)</a>
+      <a id="exportPdf" class="export-link" href="#" target="_blank" rel="noopener">Export PDF</a>
+    </div>
+
+    <section class="tabs" id="tabs" style="display:none"></section>
+    <section id="gridArea"></section>
+
+    <section class="legend" id="legend" style="display:none">
+      <span class="legend-item"><span class="chip theory"></span> Theory</span>
+      <span class="legend-item"><span class="chip lab"></span> Lab (2h, batch-split)</span>
+      <span class="legend-item"><span class="chip tut"></span> Tutorial</span>
+      <span class="legend-item"><span class="chip brk"></span> Break</span>
+    </section>
+  </section>
+
+  <section class="panel-section" id="historySection">
+    <h2>5. History</h2>
+    <table class="tt history-table" id="historyTable">
+      <thead>
+        <tr><th>ID</th><th>Label</th><th>Solver</th><th>Status</th><th>Hard</th><th>Soft</th><th>Created</th></tr>
+      </thead>
+      <tbody id="historyBody"></tbody>
+    </table>
+  </section>
+
+</main>
+
+<script src="/static/platform.js"></script>
+</body>
+</html>

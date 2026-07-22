@@ -191,6 +191,11 @@ def index():
     return FileResponse(str(STATIC_DIR / "index.html"))
 
 
+@app.get("/platform")
+def platform_page():
+    return FileResponse(str(STATIC_DIR / "platform.html"))
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
