@@ -11,6 +11,12 @@ from dataclasses import dataclass, field
 
 from timetable.models import ProblemInstance, Solution, SessionType, CourseCategory, expand_requirements
 
+# A compact day is the 6-hour minimum academic load (hard constraint 4) plus one break = 7
+# occupied periods. Days spanning wider than this are softly penalised (see `day_span` below) so
+# the optimizer prefers shorter/varied days over stretching every division across the whole
+# 08:00-late template.
+COMPACT_DAY_SPAN = 7
+
 SOFT_WEIGHTS = {
     "heavy_subject_run": 5.0,
     "teacher_workload_spread": 1.0,
@@ -21,6 +27,7 @@ SOFT_WEIGHTS = {
     "division_load_inequity": 1.0,
     "lab_distribution_pattern": 3.0,
     "break_not_midmorning": 1.5,
+    "day_span": 2.0,
 }
 
 
@@ -286,6 +293,11 @@ def score(solution: Solution, problem: ProblemInstance) -> ScoreResult:
         day_slots = problem.slots_for_day(day)
         if day_slots and s == day_slots[0].period and e == day_slots[-1].period:
             soft["earliest_latest_same_day"] += 1
+        # discourage a division's day stretching across the whole template (the "8am-to-late every
+        # day" feel): penalise the occupied span beyond a compact target, so a 6h day is preferred
+        # over an 8h day where the credit load allows, and day lengths vary across the week.
+        span = e - s + 1
+        soft["day_span"] += max(0, span - COMPACT_DAY_SPAN)
 
     for req in requirements:
         if not req.is_break:
@@ -299,10 +311,16 @@ def score(solution: Solution, problem: ProblemInstance) -> ScoreResult:
         day_slots = problem.slots_for_day(ts.day)
         if not day_slots:
             continue
-        # nudge the break toward a natural mid-morning slot (roughly a third of the way through
-        # the day, matching the real DJSCE timetables' ~11:00 break) rather than merely "anywhere
-        # legal" -- otherwise the optimizer has no reason to avoid parking it at the day's edge.
-        target_period = day_slots[0].period + max(1, round(len(day_slots) * 0.35))
+        # Vary the break's target across days so the optimizer is rewarded for SPREADING breaks
+        # over the week rather than parking every day's break in the same period. The legal band is
+        # the mid-day slots (never the first two periods or the last, per the hard rule); we rotate
+        # the per-day target through that band by day index, mirroring the greedy seed. Falls back
+        # to the ~mid-morning heuristic for very short days with no interior band.
+        band = [t.period for t in day_slots[2:-1]]
+        if band:
+            target_period = band[ts.day % len(band)]
+        else:
+            target_period = day_slots[0].period + max(1, round(len(day_slots) * 0.35))
         soft["break_not_midmorning"] += abs(ts.period - target_period)
 
     for fid, hrs in faculty_week_hours.items():

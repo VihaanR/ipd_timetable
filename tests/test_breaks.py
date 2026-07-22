@@ -49,6 +49,27 @@ def test_scorer_does_not_penalize_break_as_a_gap(small_problem):
     assert result.details["idle_gaps"] >= 0
 
 
+def test_day_span_is_a_scored_soft_term(small_problem):
+    # §16: day_span discourages a division stretching across the whole template; it must be a
+    # first-class scored term so the optimizers can see and minimize it.
+    from timetable.scoring import SOFT_WEIGHTS
+    assert "day_span" in SOFT_WEIGHTS
+    result = score(GreedySolver().solve(small_problem), small_problem)
+    assert "day_span" in result.details and result.details["day_span"] >= 0
+
+
+def test_cpsat_breaks_vary_across_days(reference_problem):
+    # §16: the break target rotates per day, so a division's breaks should spread over the week
+    # rather than all landing on the same period (the pre-fix behaviour).
+    from timetable.solvers.cpsat import CPSATSolver
+    sol = CPSATSolver().solve(reference_problem, time_limit_s=25)
+    by_div = {}
+    for req, ts in _break_placements(sol, reference_problem):
+        by_div.setdefault(req.division_id, set()).add(ts.period)
+    assert any(len(periods) >= 3 for periods in by_div.values()), \
+        f"expected a division's breaks to span >=3 distinct periods, got {by_div}"
+
+
 def test_reference_pipeline_breaks_cluster_near_midmorning(reference_problem):
     from timetable.pipeline import run_pipeline, PipelineConfig
     cfg = PipelineConfig(greedy_time_limit_s=3, mip_time_limit_s=20, ga_time_limit_s=8, cpsat_time_limit_s=20)

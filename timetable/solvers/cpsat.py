@@ -17,6 +17,7 @@ from ortools.sat.python import cp_model
 from timetable.models import (
     Assignment, CourseCategory, ProblemInstance, Solution, SessionType, expand_requirements,
 )
+from timetable.scoring import COMPACT_DAY_SPAN  # keep the day-span target in sync with the scorer
 from timetable.solvers.base import SolverBase
 from timetable.solvers.candidates import (
     NO_ROOM, batch_group_members, build_candidates, slots_by_day, sync_group_members,
@@ -230,10 +231,16 @@ class CPSATSolver(SolverBase):
                     if len(day_slots) >= 2 and ts.period in {day_slots[-1].period, day_slots[-2].period}:
                         objective_terms.append(200 * var)
                 if req.is_break:
-                    # nudge toward a natural mid-morning slot rather than merely "anywhere legal"
+                    # vary the target across days (rotate through the legal mid-day band by day
+                    # index) so breaks spread over the week instead of all landing on one period --
+                    # mirrors scoring.py's break_not_midmorning term
                     day_slots = days[day]
                     ts = next(t for t in day_slots if t.id == start_id)
-                    target_period = day_slots[0].period + max(1, round(len(day_slots) * 0.35))
+                    band = [t.period for t in day_slots[2:-1]]
+                    if band:
+                        target_period = band[day % len(band)]
+                    else:
+                        target_period = day_slots[0].period + max(1, round(len(day_slots) * 0.35))
                     dist = abs(ts.period - target_period)
                     if dist:
                         objective_terms.append(15 * dist * var)
@@ -244,6 +251,7 @@ class CPSATSolver(SolverBase):
         # to shove the break to the day's edge just to dodge the gap penalty, instead of a
         # natural mid-day placement.
         GAP_WEIGHT = 50
+        DAY_SPAN_WEIGHT = 40   # per late-tail period occupied; ~scoring.py day_span * CP-SAT scale
         for division in problem.divisions:
             for day, day_slots in days.items():
                 occupied_by_period: dict[int, list] = {ts.period: [] for ts in day_slots}
@@ -267,6 +275,16 @@ class CPSATSolver(SolverBase):
                     else:
                         model.Add(b == 0)
                     occupied_bool[period] = b
+
+                # day-span penalty: discourage occupying the late "tail" periods (beyond a compact
+                # 6h+break span from the day's start) so days end earlier and vary in length instead
+                # of every division stretching across the whole template -- mirrors scoring.py's
+                # day_span term.
+                if day_slots:
+                    first_period = day_slots[0].period
+                    for period, b in occupied_bool.items():
+                        if period - first_period >= COMPACT_DAY_SPAN:
+                            objective_terms.append(DAY_SPAN_WEIGHT * b)
 
                 periods_sorted = sorted(occupied_bool.keys())
                 for i, period in enumerate(periods_sorted):
