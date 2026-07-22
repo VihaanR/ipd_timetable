@@ -38,8 +38,9 @@ verifiable with `fastapi.testclient.TestClient` against a temp SQLite DB.
 - **Solvers never raise on infeasible input** — they return a `Solution` with a status; scoring
   penalizes it. Background jobs must still wrap the solve in try/except and record `status=failed`
   + `error` on any exception.
-- **Port is 8750. The only filesystem locations code may write are `webapp/data/` and
-  `webapp/uploads/`.** Export endpoints must write temp files under the OS temp dir or stream
+- **Port defaults to 8750. The only filesystem locations code may write are `webapp/data/` and
+  `webapp/uploads/` (override with `--port` or `TIMETABLE_PORT`; the server will fall back to the
+  next free port if needed).** Export endpoints must write temp files under the OS temp dir or stream
   bytes — not into the repo tree.
 - **Engine additions are forbidden here, but `webapp/models_db.py` may gain new tables** (additive).
 - **Tests must stay green:** `python -m pytest tests/ -q`. New API tests use `TestClient` + a temp

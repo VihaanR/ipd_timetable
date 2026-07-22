@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DJ Sanghvi Timetable Platform — Data</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">TT</div>
+    <div>
+      <h1>DJ Sanghvi Timetable Platform</h1>
+      <p class="sub">Entity data entry &middot; branches, faculty, subjects, allocations, rooms &amp; slots</p>
+    </div>
+  </div>
+  <div class="dataset-label"><a class="nav-link" href="/platform">Go to Generate &rarr;</a></div>
+</header>
+
+<main>
+
+  <nav class="dash-tabs" id="dashTabs">
+    <div class="dash-tab active" data-section="branchesSection">Branches &amp; Divisions</div>
+    <div class="dash-tab" data-section="facultySection">Faculty</div>
+    <div class="dash-tab" data-section="coursesSection">Subjects</div>
+    <div class="dash-tab" data-section="allocSection">Allocations</div>
+    <div class="dash-tab" data-section="roomsSection">Rooms &amp; Slots</div>
+  </nav>
+
+  <!-- ============================================================ Branches & Divisions -->
+  <section class="panel-section dash-section" id="branchesSection">
+    <h2>Branches</h2>
+    <form class="controls" id="branchForm">
+      <div class="control"><label>Code</label><input type="text" id="branchCode" placeholder="CSE-DS" required></div>
+      <div class="control"><label>Name</label><input type="text" id="branchName" placeholder="CSE Data Science" required></div>
+      <div class="control"><label>Semester label</label><input type="text" id="branchSemLabel" placeholder="Sem IV Jan-May 2026"></div>
+      <button type="submit" class="btn-primary">Add branch</button>
+    </form>
+    <div class="status-line" id="branchStatus"></div>
+    <div id="branchTableWrap"></div>
+
+    <h2 style="margin-top:22px">Divisions</h2>
+    <div class="controls">
+      <div class="control"><label>Branch</label><select id="divBranchSelect"></select></div>
+    </div>
+    <form class="controls" id="divForm">
+      <div class="control"><label>Name</label><input type="text" id="divName" placeholder="D1" required></div>
+      <div class="control"><label>Program</label>
+        <select id="divProgram">
+          <option value="FYUP">FYUP</option>
+          <option value="BEd">BEd</option>
+          <option value="MEd">MEd</option>
+          <option value="ITEP">ITEP</option>
+        </select>
+      </div>
+      <div class="control"><label>Semester</label><input type="number" id="divSemester" value="1" min="1" max="8"></div>
+      <div class="control"><label>Students</label><input type="number" id="divStudents" value="60" min="1"></div>
+      <div class="control"><label>Batch 1 name</label><input type="text" id="divBatch1" placeholder="D11"></div>
+      <div class="control"><label>Batch 2 name</label><input type="text" id="divBatch2" placeholder="D12"></div>
+      <button type="submit" class="btn-primary">Add division</button>
+    </form>
+    <div class="status-line" id="divStatus"></div>
+    <div id="divTableWrap"></div>
+  </section>
+
+  <!-- ============================================================ Faculty -->
+  <section class="panel-section dash-section" id="facultySection" style="display:none">
+    <h2>Faculty <span class="hint">(shared across all branches)</span></h2>
+    <form class="controls" id="facForm">
+      <div class="control"><label>Code</label><input type="text" id="facCode" placeholder="AR" required></div>
+      <div class="control"><label>Name</label><input type="text" id="facName" placeholder="Prof. Aditi Raut" required></div>
+      <div class="control"><label>Max hrs/week</label><input type="number" id="facMaxHours" value="20" min="1"></div>
+      <div class="control"><label>Max consecutive</label><input type="number" id="facMaxConsec" value="2" min="1"></div>
+      <div class="control"><label>Unavailable slot ids <span class="hint">(comma-sep, optional)</span></label><input type="text" id="facUnavail" placeholder="e.g. 3,4,12"></div>
+      <button type="submit" class="btn-primary">Add faculty</button>
+    </form>
+    <div class="status-line" id="facStatus"></div>
+    <div id="facTableWrap"></div>
+  </section>
+
+  <!-- ============================================================ Subjects (Courses) -->
+  <section class="panel-section dash-section" id="coursesSection" style="display:none">
+    <h2>Subjects</h2>
+    <div class="controls">
+      <div class="control"><label>Branch</label><select id="courseBranchSelect"></select></div>
+    </div>
+    <form class="controls" id="courseForm">
+      <div class="control"><label>Code</label><input type="text" id="courseCode" placeholder="DS" required></div>
+      <div class="control"><label>Title</label><input type="text" id="courseTitle" placeholder="Data Structures" required></div>
+      <div class="control"><label>Credits</label><input type="number" id="courseCredits" value="3" min="1" max="10"></div>
+      <div class="control"><label>Category</label>
+        <select id="courseCategory">
+          <option value="Major">Major</option>
+          <option value="Minor">Minor</option>
+          <option value="Skill-Based">Skill-Based</option>
+          <option value="Ability-Enhancement">Ability-Enhancement (AEC)</option>
+          <option value="Value-Added">Value-Added (VAC)</option>
+          <option value="Open-Elective">Open-Elective</option>
+          <option value="Teaching-Practice">Teaching-Practice</option>
+          <option value="Fieldwork">Fieldwork</option>
+          <option value="Internship">Internship</option>
+          <option value="Project">Project</option>
+        </select>
+      </div>
+      <div class="control"><label>Theory/wk</label><input type="number" id="courseTheory" value="0" min="0" max="10"></div>
+      <div class="control"><label>Practical/wk</label><input type="number" id="coursePractical" value="0" min="0" max="10"></div>
+      <div class="control"><label>Tutorial/wk</label><input type="number" id="courseTutorial" value="0" min="0" max="10"></div>
+      <div class="control checkbox-control"><label><input type="checkbox" id="courseHeavy"> Heavy subject</label></div>
+      <button type="submit" class="btn-primary">Add subject</button>
+    </form>
+    <div class="status-line" id="courseStatus"></div>
+    <div id="courseTableWrap"></div>
+  </section>
+
+  <!-- ============================================================ Allocations -->
+  <section class="panel-section dash-section" id="allocSection" style="display:none">
+    <h2>Allocations <span class="hint">(division &times; subject &rarr; faculty)</span></h2>
+    <div class="controls">
+      <div class="control"><label>Branch</label><select id="allocBranchSelect"></select></div>
+      <div class="control"><label>Division</label><select id="allocDivisionSelect"></select></div>
+    </div>
+    <form class="controls" id="allocForm">
+      <div class="control"><label>Subject</label><select id="allocCourseSelect"></select></div>
+      <div class="control" id="allocSingleWrap"><label>Faculty (whole division)</label><select id="allocFaculty"></select></div>
+      <div class="control" id="allocBatch1Wrap" style="display:none"><label>Batch 1 faculty</label><select id="allocBatch1Faculty"></select></div>
+      <div class="control" id="allocBatch2Wrap" style="display:none"><label>Batch 2 faculty</label><select id="allocBatch2Faculty"></select></div>
+      <button type="submit" class="btn-primary">Add allocation</button>
+    </form>
+    <p class="notes" id="allocHint"></p>
+    <div class="status-line" id="allocStatus"></div>
+    <div id="allocTableWrap"></div>
+  </section>
+
+  <!-- ============================================================ Rooms & Slots -->
+  <section class="panel-section dash-section" id="roomsSection" style="display:none">
+    <h2>Rooms <span class="hint">(shared across all branches)</span></h2>
+    <form class="controls" id="roomForm">
+      <div class="control"><label>Code</label><input type="text" id="roomCode" placeholder="CR51" required></div>
+      <div class="control"><label>Name</label><input type="text" id="roomName" placeholder="Classroom 51" required></div>
+      <div class="control"><label>Capacity</label><input type="number" id="roomCapacity" value="60" min="1"></div>
+      <div class="control"><label>Type</label>
+        <select id="roomType"><option value="classroom">Classroom</option><option value="lab">Lab</option></select>
+      </div>
+      <button type="submit" class="btn-primary">Add room</button>
+    </form>
+    <div class="status-line" id="roomStatus"></div>
+    <div id="roomTableWrap"></div>
+
+    <h2 style="margin-top:22px">Weekly slot grid <span class="hint">(one institutional grid; Save replaces the whole grid)</span></h2>
+    <form class="controls" id="slotForm">
+      <div class="control"><label>Day</label>
+        <select id="slotDay">
+          <option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option>
+          <option value="3">Thursday</option><option value="4">Friday</option>
+        </select>
+      </div>
+      <div class="control"><label>Period (0-based)</label><input type="number" id="slotPeriod" value="0" min="0" max="20"></div>
+      <div class="control"><label>Start</label><input type="text" id="slotStart" placeholder="08:00" value="08:00"></div>
+      <div class="control"><label>End</label><input type="text" id="slotEnd" placeholder="09:00" value="09:00"></div>
+      <button type="button" class="btn-primary" id="slotAddRowBtn">Add row to grid</button>
+    </form>
+    <div class="control-row">
+      <button type="button" class="btn-primary" id="slotSaveBtn">Save grid (replaces all)</button>
+      <span class="status-line" id="slotStatus"></span>
+    </div>
+    <div id="slotTableWrap"></div>
+  </section>
+
+</main>
+
+<script src="/static/dashboard.js"></script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-"""Small shared helpers for the entity routers (design.md §5.1 — uniform CRUD)."""
+ bbbvnhyu7bh6"""Small shared helpers for the entity routers (design.md §5.1 — uniform CRUD)."""
 from __future__ import annotations
 
 from fastapi import HTTPException

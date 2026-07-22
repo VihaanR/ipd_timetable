@@ -42,6 +42,7 @@
           <option value="greedy">Greedy — instant</option>
           <option value="cpsat">CP-SAT — best quality, slower</option>
           <option value="pipeline">Hybrid pipeline — slower</option>
+          <option value="compare">Compare — greedy / cpsat / pipeline</option>
         </select>
       </div>
       <div class="control">
@@ -68,6 +69,12 @@
       <h2>Hybrid pipeline stages</h2>
       <div class="stage-track" id="stageTrack"></div>
     </div>
+
+    <section class="panel-section compare-panel" id="compareSection" style="display:none">
+      <h2>Compare mode</h2>
+      <p class="notes" id="compareNote"></p>
+      <div id="compareTableWrap"></div>
+    </section>
 
     <div class="export-row" id="exportRow" style="display:none">
       <a id="exportXlsx" class="export-link" href="#" target="_blank" rel="noopener">Export Excel (.xlsx)</a>

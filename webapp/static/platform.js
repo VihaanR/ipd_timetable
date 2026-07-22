@@ -12,6 +12,8 @@ let currentRunId = null;
 let pollTimer = null;
 let originalGrids = null;          // the un-adjusted run grids, so "Restore original" can revert
 let movedIds = new Set();          // session ids relocated by the last adjustment (for highlighting)
+let compareResults = [];
+let compareActiveIndex = 0;
 
 $("seedBtn").addEventListener("click", loadSeed);
 $("generateBtn").addEventListener("click", generate);
@@ -40,7 +42,7 @@ async function loadSeed() {
         `${data.rooms} rooms, ${data.slots} slots (branch ${data.branch_code}).`;
     }
   } catch (e) {
-    $("seedStatus").textContent = "backend not reachable — start the server on port 8750.";
+    $("seedStatus").textContent = "backend not reachable — start the server on port 8750 (or set TIMETABLE_PORT).";
   } finally {
     btn.disabled = false;
     checkReadiness();
@@ -58,7 +60,7 @@ async function checkReadiness() {
     const data = await res.json();
     renderReadiness(data);
   } catch (e) {
-    banner.textContent = "Could not reach the backend API. Is the server running on port 8750?";
+    banner.textContent = "Could not reach the backend API. Is the server running on port 8750 (or set TIMETABLE_PORT)?";
     banner.className = "readiness-banner not-ready";
   }
 }
@@ -85,6 +87,8 @@ async function generate() {
   $("exportRow").style.display = "none";
   $("tabs").style.display = "none";
   $("legend").style.display = "none";
+  $("compareSection").style.display = "none";
+  $("compareTableWrap").innerHTML = "";
   $("gridArea").innerHTML = "";
   currentGrids = null;
   currentRunId = null;
@@ -97,11 +101,27 @@ async function generate() {
   };
 
   try {
-    const res = await fetch("/api/runs", {
+    const endpoint = $("solver").value === "compare" ? "/api/compare" : "/api/runs";
+    const comparePayload = { ...payload, solvers: ["pipeline", "cpsat", "greedy"] };
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify($("solver").value === "compare" ? comparePayload : payload),
     });
+    if ($("solver").value === "compare") {
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error("HTTP " + res.status + " — " + text.slice(0, 300));
+      }
+      const data = await res.json();
+      $("adjustSection").style.display = "none";
+      $("restoreBtn").style.display = "none";
+      $("adjStatus").textContent = "";
+      renderCompare(data);
+      $("genStatus").textContent = `compare mode done — best: ${data.best_solver}.`;
+      btn.disabled = false;
+      return;
+    }
     if (res.status === 400) {
       const body = await res.json();
       const issues = Array.isArray(body.detail) ? body.detail : [String(body.detail)];
@@ -126,6 +146,64 @@ async function generate() {
   } catch (e) {
     $("genStatus").textContent = "error: " + (e.message || e);
     btn.disabled = false;
+  }
+}
+
+function renderCompare(data) {
+  compareResults = data.results || [];
+  compareActiveIndex = data.best_index ?? 0;
+  const best = compareResults[compareActiveIndex];
+  if (!best) {
+    $("compareSection").style.display = "none";
+    return;
+  }
+
+  $("compareSection").style.display = "block";
+  $("compareNote").textContent =
+    `Compared ${compareResults.length} solvers on the same snapshot. Best result: ${data.best_solver}.`;
+
+  const rows = compareResults.map((result, index) => {
+    const active = index === compareActiveIndex ? " best" : "";
+    const status = result.status === "done" ? "good" : "bad";
+    return `<tr class="${active}">
+      <td>${result.solver}${index === data.best_index ? ' <span class="compare-pill">best</span>' : ''}</td>
+      <td><span class="stat-val ${status}">${result.status}</span></td>
+      <td>${result.hard_violations}</td>
+      <td>${typeof result.soft_cost === "number" ? result.soft_cost.toFixed(1) : result.soft_cost}</td>
+      <td>${typeof result.wall_clock_s === "number" ? result.wall_clock_s.toFixed(1) : result.wall_clock_s}s</td>
+      <td><button type="button" data-compare-view="${index}">View</button></td>
+    </tr>`;
+  }).join("");
+
+  $("compareTableWrap").innerHTML = `
+    <table class="tt compare-table">
+      <thead>
+        <tr><th>Solver</th><th>Status</th><th>Hard</th><th>Soft</th><th>Wall</th><th></th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+
+  $("compareTableWrap").querySelectorAll("button[data-compare-view]").forEach((button) => {
+    button.addEventListener("click", () => viewCompareResult(parseInt(button.dataset.compareView, 10)));
+  });
+
+  viewCompareResult(compareActiveIndex, true);
+}
+
+function viewCompareResult(index, skipTable = false) {
+  const result = compareResults[index];
+  if (!result) return;
+  compareActiveIndex = index;
+  currentGrids = result.grids;
+  currentRunId = null;
+  activeDivision = 0;
+  renderSummary(result);
+  renderStages(result.stage_reports);
+  renderTabs();
+  renderGrid();
+  $("legend").style.display = "flex";
+  if (!skipTable) {
+    renderCompare({ results: compareResults, best_index: compareActiveIndex, best_solver: compareResults[compareActiveIndex]?.solver });
   }
 }
 
@@ -187,7 +265,8 @@ function renderSummary(run) {
   hard.className = "stat-val " + (run.hard === 0 ? "good" : "bad");
   $("statSoft").textContent = typeof run.soft === "number" ? run.soft.toFixed(1) : run.soft;
   // wall_clock is the solver's total solve time (pipeline total, or the single solver's own).
-  $("statWall").textContent = typeof run.wall_clock === "number" ? run.wall_clock.toFixed(1) + "s" : "—";
+  const wall = typeof run.wall_clock === "number" ? run.wall_clock : run.wall_clock_s;
+  $("statWall").textContent = typeof wall === "number" ? wall.toFixed(1) + "s" : "—";
 }
 
 function renderStages(stages) {

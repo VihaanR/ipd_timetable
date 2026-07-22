@@ -158,6 +158,8 @@ python -m uvicorn webapp.server:app --port 8750
 ```
 then open `http://127.0.0.1:8750`.
 
+If 8750 is busy, the server will automatically fall back to the next free port and print the URL to open.
+
 ## 9. Honest limitations (good to raise proactively with a mentor)
 
 - **MIP doesn't linearize gap-minimization** — the auxiliary variables needed are complex to
@@ -195,3 +197,5 @@ python benchmarks/compare_solvers.py --reference --cpsat-time-limit 60
 # 4. Open the live web showcase
 python -m uvicorn webapp.server:app --port 8750
 ```
+
+If 8750 is busy, the server will automatically fall back to the next free port and print the URL to open.

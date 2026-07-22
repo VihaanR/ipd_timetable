@@ -82,9 +82,11 @@ design.md            Full platform design spec (architecture, API, schema, roadm
 > mirrored in `cpsat.py`). **Not yet built:** entity-CRUD frontend forms (faculty/subjects/etc. are
 > API-only — no data-entry UI), `extract_calendar.py` + calendar router (P3), the DJSCE light theme
 > (P5), and the remaining design-change decisions (disruption **full re-solve** — `/adjust` is still
-> the minimal-change patcher that drops un-relocatable sessions — plus compare mode + undo; see
-> design.md §7/§5.3). **Note:** DB-backed generate lives at `POST /api/runs` (not `/api/generate`,
-> the legacy in-memory showcase at `/`). The DB-backed adjust is `POST /api/runs/{id}/adjust`.
+> the minimal-change patcher that re-plans the disrupted day, relocates what fits, and drops only
+> sessions that cannot be placed — plus undo; see design.md §7/§5.3). **Compare mode is now on the
+> platform** for side-by-side solver checks. **Note:** DB-backed generate lives at `POST /api/runs`
+> (not `/api/generate`, the legacy in-memory showcase at `/`). The DB-backed adjust is
+> `POST /api/runs/{id}/adjust`.
 
 **Engine data flow:** `ProblemInstance` → `expand_requirements()` → ordered
 `list[SessionRequirement]` → *(solver)* → `Solution` (list of `Assignment`) →
@@ -205,9 +207,9 @@ it is still loadable directly via `sample_data.load_reference_instance()`.
 ```bash
 pip install -r requirements.txt
 
-# THE PLATFORM (primary path) — port 8750 (8000 is OS-reserved on this Windows box)
-python -m uvicorn webapp.server:app --port 8750
-# then open http://127.0.0.1:8750 — seed the reference branch, edit entities, generate, adjust
+# THE PLATFORM (primary path) — default port 8750 (8000 is OS-reserved on this Windows box)
+python -m uvicorn webapp.server:app --port 8750   # or set TIMETABLE_PORT
+# then open the URL printed by the server — seed the reference branch, edit entities, generate, adjust
 
 # Engine CLI (dev/benchmark tool)
 python cli.py generate --solver pipeline --reference --out tt.xlsx --pdf tt.pdf
@@ -312,8 +314,9 @@ the platform UI.
 
 ## 11. Web Platform (`webapp/`) — see design.md §3–§8 for the full spec
 
-- **Run:** `python -m uvicorn webapp.server:app --port 8750`. Port **8750** everywhere (8000 is
-  OS-reserved on this box).
+- **Run:** `python -m uvicorn webapp.server:app --port 8750`. Default port **8750** (8000 is
+  OS-reserved on this box); override with `--port` or `TIMETABLE_PORT`, and the server will fall
+  back to the next free port if needed.
 - **API:** entity CRUD (`/api/branches`, `/api/faculty`, `/api/courses`, `/api/rooms`,
   `/api/allocations`, `/api/slots`), `POST /api/seed/reference`, calendar
   (`/api/calendar/upload` multipart → `/api/calendar/extract/{id}` optional →

@@ -24,7 +24,8 @@ python cli.py generate --solver pipeline --reference --out timetable.xlsx --pdf 
 python benchmarks/compare_solvers.py --reference --cpsat-time-limit 300
 
 # Launch the web showcase (interactive timetable viewer)
-python -m uvicorn webapp.server:app --port 8750   # then open http://127.0.0.1:8750
+python -m uvicorn webapp.server:app --port 8750   # or set TIMETABLE_PORT; the server falls back to the next free port
+# then open the URL printed by the server
 
 # Run the tests
 python -m pytest tests/ -q

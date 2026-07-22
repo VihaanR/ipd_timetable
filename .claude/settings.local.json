@@ -40,7 +40,9 @@
       "Bash(python -c \"import webapp.server as s; print\\('server SINGLE_SOLVERS:', list\\(s.SINGLE_SOLVERS\\)\\); print\\('app title:', s.app.title\\)\")",
       "Bash(python -m pytest tests/test_api_entities.py -q)",
       "Bash(git init *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(cd \"C:\\\\Users\\\\Vihaan\\\\.claude\\\\plugins\\\\cache\\\\claude-plugins-official\\\\superpowers\\\\6.0.3\\\\skills\\\\subagent-driven-development\\\\scripts\" && ls && echo \"=== task-brief ===\" && cat task-brief 2>&1 | head -60)",
+      "Read(//c/Users/Vihaan/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/skills/subagent-driven-development/scripts/**)"
     ]
   }
 }

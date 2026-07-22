@@ -24,7 +24,7 @@ function showBackendError(where) {
     `<div class="notes" style="font-size:14px;line-height:1.7">
        <b>⚠ Backend not reachable</b> (${where}).<br>${msg}
        <pre style="background:var(--panel-2);padding:12px;border-radius:8px;margin-top:8px;white-space:pre-wrap">python -m uvicorn webapp.server:app --port 8750</pre>
-       then open <b>http://127.0.0.1:8750</b> in your browser.
+       the server defaults to port 8750, but it will fall back to the next free port and print the URL if 8750 is busy.
      </div>`;
 }
 

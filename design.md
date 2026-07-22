@@ -166,8 +166,9 @@ with branch count; the CP-SAT time budget is the knob (§12).
 
 ## 5. API Specification
 
-All endpoints under `/api`. Port standardized to **8750** (8000 is OS-reserved on the dev
-machine; the current server-default-8000 vs JS-hint-8750 mismatch is fixed in P0). Errors return
+All endpoints under `/api`. Port defaults to **8750** (8000 is OS-reserved on the dev
+machine; override with `--port` or `TIMETABLE_PORT`, and the server will fall back to the next
+free port if 8750 is busy). Errors return
 `{"detail": "..."}` (FastAPI default shape) with 4xx for validation and 404 for missing ids.
 
 ### 5.1 Entity CRUD (uniform SQLModel pattern)
@@ -210,7 +211,7 @@ re-seeds).
 | `GET /api/runs/{id}` | `{status, hard, soft, grids, stage_reports, error}` — UI polls every 2 s |
 | `GET /api/runs` | Run history (id, label, solver, status, scores, created_at) |
 | `GET /api/runs/{id}/export.xlsx` / `.pdf` | Reconstructs `ProblemInstance` from the snapshot + solution and calls the existing `export.py` |
-| `POST /api/runs {solver: "compare", solvers: ["cpsat","pipeline","greedy"], time_limit, label?}` | **⚠️ DESIGN-ONLY — NOT YET IMPLEMENTED (as of P2, 2026-07-21).** The as-built `POST /api/runs` accepts a single `solver` (`pipeline` or a `SOLVERS` key) and rejects `"compare"` with 400; the request model has no `solvers` field. **When built (a "design-change decisions" task, separate from P2):** runs each solver named in `solvers` on the same problem snapshot in one job; the run row stores one solution/grid/score per selected solver, keyed by name; UI renders a comparison table (`hard`/`soft`/`wall_clock_seconds` per solver) plus tabs to view each grid — the live version of the CLAUDE.md §13 benchmark table |
+| `POST /api/compare {solvers: ["cpsat","pipeline","greedy"], time_limit, label?, branch_ids?}` | **Implemented 2026-07-22.** Runs each solver named in `solvers` on the same problem snapshot and returns one solution/grid/score per solver, keyed by name; the UI renders a comparison table (`hard`/`soft`/`wall_clock_seconds` per solver) plus tabs/buttons to view each grid — the live version of the CLAUDE.md §13 benchmark table. Defaults to all three platform-exposed solvers when `solvers` is omitted. |
 
 The solver code is synchronous; a background task with a sync function runs in Starlette's
 threadpool, so the event loop stays responsive. **Solver choices exposed (revised 2026-07-21):**
@@ -218,15 +219,14 @@ threadpool, so the event loop stays responsive. **Solver choices exposed (revise
 observation in CLAUDE.md §13 that CP-SAT produces the best-quality timetable). `pipeline` and
 `greedy` remain selectable. See §9 for why `mip`/`ga`/`ensemble` stay engine-only.
 
-**Compare mode — solver-selectable (revised 2026-07-21).** `solver: "compare"` runs multiple
-solvers on the same snapshot in one job and returns them side by side. Which ones run is **not
-fixed** — the request carries an explicit `solvers: [...]` list (checkboxes in the UI, §8.1) drawn
-from the platform-exposed set `{cpsat, pipeline, greedy}`; the user picks any subset of ≥2 (a
-single-item "compare" is just a regular generate). Defaults to all three if `solvers` is omitted.
-Each selected solver gets its own row in `stage_reports`/the run's per-solver score map
-(`hard`/`soft`/`wall_clock_seconds`), rendered as a comparison table with a grid tab per solver.
-Raw `mip`/`ga`/`ensemble` are **not** offered in the Compare checklist — they stay engine+CLI-only
-per §9's existing reasoning (fewer choices, less support surface on the platform).
+**Compare mode — solver-selectable (implemented 2026-07-22).** `POST /api/compare` runs multiple
+solvers on the same snapshot and returns them side by side. Which ones run is **not fixed** — the
+request carries an explicit `solvers: [...]` list (checkboxes in the UI, §8.1) drawn from the
+platform-exposed set `{cpsat, pipeline, greedy}`; the user picks any subset of ≥1. Defaults to all
+three if `solvers` is omitted. Each selected solver gets its own row in the comparison table with a
+view button per solver. Raw `mip`/`ga`/`ensemble` are **not** offered in the Compare checklist —
+they stay engine+CLI-only per §9's existing reasoning (fewer choices, less support surface on the
+platform).
 
 **Honest limits (also in §12):** background tasks die with the process; no cancellation; one run
 at a time. The cloud upgrade is swapping task scheduling for a worker queue **without changing
@@ -472,7 +472,7 @@ gradients and gradient buttons are replaced with flat brand surfaces.
 | Missing `problem_to_dict` (docstring at `io_json.py:4` references it; it doesn't exist) | **Add** (P0) | Anti-redundancy: fixes a documented lie, and it is required for `timetable_run.problem_snapshot` |
 | `run_ensemble` | **Keep in engine, drop from platform UI** | Its purpose is the benchmark narrative (`compare_solvers.py`, CLAUDE.md). The UI exposes `cpsat` (default) / `pipeline` / `greedy`, plus the new **Compare mode** (§5.3) that runs all three at once for a side-by-side comparison table. Raw `mip`/`ga` stay engine + CLI only |
 | Hardcoded `_load()` + reference-dataset path in `server.py` | **Retire**; dataset becomes the `POST /api/seed/reference` fixture | Satisfies R7 while keeping the valuable real-world data |
-| Port mismatch (server default 8000; `app.js` hint 8750) | **Fix**: 8750 everywhere (P0) | 8000 is OS-reserved on the dev machine |
+| Port mismatch (server default 8000; `app.js` hint 8750) | **Fix**: default 8750 + override support (P0) | 8000 is OS-reserved on the dev machine |
 | `expand_requirements` tutorial loop reuses stale `sync_group_id` (`models.py:282–292`) | **Fix** (P0): compute per-loop | Verified latent bug: `NameError` if the first course has tutorials but no theory; wrong OE sync group otherwise |
 | `sample_data.py` synthetic generator, `benchmarks/`, `references/` | **Keep untouched** | The benchmark harness is a core stated asset, not redundancy |
 
@@ -484,7 +484,7 @@ Rule: never delete anything tests import; run `pytest -q` after every removal.
 
 | Phase | Scope | Files | Done when |
 |-------|-------|-------|-----------|
-| **P0 — Groundwork** (½ day) | Solver registry; port 8750 default; add `problem_to_dict`; fix `sync_group_id` bug | `timetable/solvers/__init__.py`, `webapp/server.py`, `webapp/static/app.js`, `timetable/io_json.py`, `timetable/models.py`, `cli.py` | `pytest -q` green; `cli.py` and server share one registry |
+| **P0 — Groundwork** (½ day) | Solver registry; port 8750 default + override; add `problem_to_dict`; fix `sync_group_id` bug | `timetable/solvers/__init__.py`, `webapp/server.py`, `webapp/static/app.js`, `timetable/io_json.py`, `timetable/models.py`, `cli.py` | `pytest -q` green; `cli.py` and server share one registry |
 | **P1 — Persistence + CRUD** (2–3 days) | SQLModel tables, entity routers, seed endpoint, SPA nav shell + entry pages 1–5 | `webapp/db.py`, `webapp/models_db.py`, `webapp/routers/*.py`, `webapp/seed.py`, `webapp/static/js/api.js`, `webapp/static/js/pages/*.js` | Reference dataset seeded with one click; every entity editable in the browser |
 | **P2 — Generate + Grids** (1–2 days) | `problem_builder`, jobs, generate/poll/runs/export endpoints, Generate page, readiness banner | `webapp/problem_builder.py`, `webapp/jobs.py`, `webapp/routers/runs.py`, Generate page JS | DB-entered data produces a rendered, exportable timetable with `hard = 0` |
 | **P3 — Calendar** (1–2 days) | Upload + validation + `uploads/`, events review CRUD + UI (Layer 0), optional Claude extraction (Layer 1) | `webapp/routers/calendar.py`, `webapp/extract_calendar.py`, Calendar page JS | A real DJSCE calendar PDF uploaded, holidays confirmed, term view renders |

@@ -11,17 +11,20 @@ The last generated timetable is cached in memory (single-admin showcase; real pe
 later roadmap phase per design.md §4/§10). /api/adjust re-plans against that cached baseline.
 
 Run:  python -m uvicorn webapp.server:app --port 8750
+    (or set TIMETABLE_PORT / PORT; the server falls back to the next free port if 8750 is busy)
 """
 from __future__ import annotations
 
 import argparse
+import os
+import socket
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -42,9 +45,38 @@ from webapp.routers import branches, faculty, courses, rooms, allocations, slots
 from webapp import seed
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+DEFAULT_PORT = 8750
 
 # in-memory cache of the most recent generation, so /api/adjust has a baseline to re-plan over
 _LAST = {"problem": None, "solution": None, "label": None}
+
+
+def _default_port() -> int:
+    for name in ("TIMETABLE_PORT", "PORT"):
+        value = os.getenv(name)
+        if value:
+            try:
+                return int(value)
+            except ValueError as exc:
+                raise SystemExit(f"Invalid port in {name}: {value!r}") from exc
+    return DEFAULT_PORT
+
+
+def _port_is_available(host: str, port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def _choose_port(host: str, preferred_port: int) -> int:
+    port = preferred_port
+    while not _port_is_available(host, port):
+        port += 1
+    return port
 
 
 @asynccontextmanager
@@ -188,7 +220,12 @@ def api_adjust(req: AdjustRequest):
 
 @app.get("/")
 def index():
-    return FileResponse(str(STATIC_DIR / "index.html"))
+    return RedirectResponse(url="/dashboard", status_code=307)
+
+
+@app.get("/dashboard")
+def dashboard_page():
+    return FileResponse(str(STATIC_DIR / "dashboard.html"))
 
 
 @app.get("/platform")
@@ -202,10 +239,13 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8750)  # 8000 is OS-reserved on the dev box
+    parser.add_argument("--port", type=int, default=_default_port())
     args = parser.parse_args()
     import uvicorn
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    port = _choose_port(args.host, args.port)
+    if port != args.port:
+        print(f"Requested port {args.port} is busy; using {port} instead.")
+    uvicorn.run(app, host=args.host, port=port, log_level="info")
 
 
 if __name__ == "__main__":

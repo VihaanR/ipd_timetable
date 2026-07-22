@@ -148,6 +148,28 @@ table.tt th.time-col, table.tt td.time-col {
 @keyframes spin { to { transform: rotate(360deg); } }
 .notes { color: var(--tut); font-size: 12.5px; margin-top: 10px; }
 
+.compare-panel { margin-top: 22px; }
+.compare-table tr.best { background: rgba(53,208,165,.06); }
+.compare-table button {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+.compare-table button:hover { border-color: var(--accent); color: var(--accent); }
+.compare-pill {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--good);
+  border: 1px solid var(--good);
+}
+
 /* -------------------------------------------------------------- platform.html (P2 generate page) */
 .panel-section {
   background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
