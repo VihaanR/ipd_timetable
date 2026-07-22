@@ -207,4 +207,5 @@ class TimetableRun(SQLModel, table=True):
     stage_reports: Optional[list] = Field(default=None, sa_column=Column(JSON))
     hard: Optional[int] = None
     soft: Optional[float] = None
+    wall_clock: Optional[float] = None    # total solve wall-clock seconds (pipeline total, or solver's)
     error: Optional[str] = None

@@ -101,6 +101,7 @@ def get_run(run_id: int, session: Session = Depends(get_session)):
         "label": run.label,
         "hard": run.hard,
         "soft": run.soft,
+        "wall_clock": run.wall_clock,
         "grids": run.grids,
         "stage_reports": run.stage_reports,
         "error": run.error,

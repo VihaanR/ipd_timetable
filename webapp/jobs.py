@@ -61,8 +61,10 @@ def run_generation(run_id: int) -> None:
                 result = run_pipeline(problem, config)
                 solution = result.final
                 stage_reports = _stage_reports_from(result)
+                wall_clock = result.total_wall_clock_s
             else:
                 solution = SOLVERS[run.solver]().solve(problem, time_limit_s=run.time_limit)
+                wall_clock = solution.wall_clock_seconds
 
             sc = score(solution, problem)
             grids = solution_to_grids(solution, problem)
@@ -72,6 +74,7 @@ def run_generation(run_id: int) -> None:
             run.stage_reports = stage_reports
             run.hard = sc.hard_violations
             run.soft = sc.soft_cost
+            run.wall_clock = wall_clock
             run.status = "done"
             session.add(run)
             session.commit()

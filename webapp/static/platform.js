@@ -171,15 +171,9 @@ function renderSummary(run) {
   const hard = $("statHard");
   hard.textContent = run.hard;
   hard.className = "stat-val " + (run.hard === 0 ? "good" : "bad");
-  $("statSoft").textContent = run.soft;
-  // the run record doesn't carry a standalone wall-clock field; when stage_reports are present
-  // (pipeline solver) sum them for an approximate total, otherwise there's nothing to show.
-  if (run.stage_reports && run.stage_reports.length) {
-    const total = run.stage_reports.reduce((sum, s) => sum + (s.wall_clock_s || 0), 0);
-    $("statWall").textContent = total.toFixed(1) + "s";
-  } else {
-    $("statWall").textContent = "—";
-  }
+  $("statSoft").textContent = typeof run.soft === "number" ? run.soft.toFixed(1) : run.soft;
+  // wall_clock is the solver's total solve time (pipeline total, or the single solver's own).
+  $("statWall").textContent = typeof run.wall_clock === "number" ? run.wall_clock.toFixed(1) + "s" : "—";
 }
 
 function renderStages(stages) {
