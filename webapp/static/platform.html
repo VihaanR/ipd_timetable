@@ -5,6 +5,30 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DJ Sanghvi Timetable Platform</title>
 <link rel="stylesheet" href="/static/style.css">
+<style>
+  /* Compare-solvers panel (kept local to this page per the theme-migration freeze on style.css;
+     reuses existing classes/vars — .panel-section, .controls, .control, .tab, .tt, .stat-val,
+     .status-line, .notes — so the pending theme rewrite applies here automatically). */
+  .compare-checks { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+  .compare-checks label {
+    display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13.5px;
+    cursor: pointer; color: var(--text);
+  }
+  #compareBtn {
+    padding: 11px 22px; border: none; border-radius: 10px; cursor: pointer;
+    font-size: 14px; font-weight: 700; color: var(--bg);
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  }
+  #compareBtn:disabled { opacity: .5; cursor: not-allowed; }
+  .compare-badge {
+    display: inline-block; margin-left: 6px; padding: 2px 9px; border-radius: 20px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .3px;
+    background: transparent; border: 1px solid var(--good); color: var(--good);
+  }
+  tr.compare-winner td:first-child { border-left: 3px solid var(--good); padding-left: 7px; }
+  #compareResultWrap { margin-top: 16px; }
+  #compareDivTabs { margin-top: -6px; }
+</style>
 </head>
 <body>
 <header class="topbar">
@@ -88,8 +112,49 @@
     </section>
   </section>
 
+  <section class="panel-section" id="compareSection">
+    <h2>5. Compare solvers</h2>
+    <p class="notes" id="compareNote">
+      Runs the selected solvers back-to-back against the current data and compares them
+      head-to-head. This is one synchronous request — it does not create a run in the history
+      table below and has no export links; cpsat/pipeline can each take 20&ndash;60s, so comparing
+      all three can take a few minutes.
+    </p>
+    <div class="controls">
+      <div class="control">
+        <label>Solvers (pick at least 2)</label>
+        <div class="compare-checks">
+          <label><input type="checkbox" id="cmpCpsat" checked> CP-SAT</label>
+          <label><input type="checkbox" id="cmpPipeline"> Hybrid pipeline</label>
+          <label><input type="checkbox" id="cmpGreedy" checked> Greedy</label>
+        </div>
+      </div>
+      <div class="control">
+        <label>Time limit (s)</label>
+        <input type="number" id="compareTimeLimit" value="20" min="2" max="600" step="5">
+      </div>
+      <button id="compareBtn">Run comparison</button>
+    </div>
+    <div class="status-line" id="compareStatus"></div>
+
+    <div id="compareResultWrap" style="display:none">
+      <table class="tt history-table" id="compareTable">
+        <thead>
+          <tr><th>Solver</th><th>Status</th><th>Hard violations</th><th>Soft cost</th><th>Wall clock (s)</th></tr>
+        </thead>
+        <tbody id="compareTableBody"></tbody>
+      </table>
+      <p class="notes">Lower soft cost is better. Hard violations dominate: any result with hard
+        violations above zero ranks below one with zero, regardless of soft cost.</p>
+
+      <section class="tabs" id="compareTabs"></section>
+      <section class="tabs" id="compareDivTabs"></section>
+      <section id="compareGridArea"></section>
+    </div>
+  </section>
+
   <section class="panel-section" id="adjustSection" style="display:none">
-    <h2>5. Holiday / rain adjustment</h2>
+    <h2>6. Holiday / rain adjustment</h2>
     <p class="notes">Adjust the current timetable (run <span id="adjustRunId">—</span>) for a sudden holiday or
       rain. Unaffected days stay put; sessions in the blocked window are relocated within the day where they
       fit, otherwise dropped for that occurrence. The stored run is never changed.</p>
@@ -122,7 +187,7 @@
   </section>
 
   <section class="panel-section" id="historySection">
-    <h2>6. History</h2>
+    <h2>7. History</h2>
     <table class="tt history-table" id="historyTable">
       <thead>
         <tr><th>ID</th><th>Label</th><th>Solver</th><th>Status</th><th>Hard</th><th>Soft</th><th>Created</th></tr>

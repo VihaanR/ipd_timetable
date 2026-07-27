@@ -76,6 +76,17 @@
   .muted { color: var(--muted); }
   .two-up { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; }
   @media (max-width: 960px) { .two-up { grid-template-columns: 1fr; } }
+  .del-btn, .edit-btn {
+    border-radius: 8px; padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer;
+    border: 1px solid var(--line); white-space: nowrap;
+  }
+  .del-btn { background: transparent; color: var(--bad); border-color: var(--bad); }
+  .del-btn:hover { background: rgba(180, 35, 24, 0.08); }
+  .edit-btn { background: transparent; color: var(--accent-2); border-color: var(--accent); margin-right: 6px; }
+  .edit-btn:hover { background: rgba(15, 108, 189, 0.08); }
+  td.actions-cell { white-space: nowrap; }
+  select[multiple] { height: auto; }
+  .form-actions { display: flex; gap: 10px; align-items: center; }
 </style>
 </head>
 <body>
@@ -105,8 +116,15 @@
             <div class="field"><label>Name</label><input name="name" placeholder="A. R. Teacher" required></div>
             <div class="field"><label>Max load hours</label><input name="max_load_hours_per_week" type="number" value="20" min="1" required></div>
             <div class="field"><label>Max consecutive</label><input name="max_consecutive_sessions" type="number" value="2" min="1" required></div>
+            <div class="field" style="grid-column: 1 / -1;">
+              <label>Unavailable slots (Ctrl/Cmd-click to select multiple; build &amp; save the slot grid first)</label>
+              <select name="unavailable_slot_ids" id="facultyUnavailable" multiple size="6"></select>
+            </div>
           </div>
-          <button type="submit">Add faculty</button>
+          <div class="form-actions">
+            <button type="submit" id="facultySubmitBtn">Add faculty</button>
+            <button type="button" id="facultyCancelEditBtn" class="btn secondary" style="display:none;">Cancel edit</button>
+          </div>
         </form>
         <div class="status" id="facultyStatus"></div>
         <div id="facultyTable"></div>
@@ -262,21 +280,31 @@
 
     function renderFaculty() {
       const rows = state.faculty.map((f) => `
-        <tr><td>${f.id}</td><td>${esc(f.code)}</td><td>${esc(f.name)}</td><td>${f.max_load_hours_per_week}</td></tr>`).join("");
+        <tr>
+          <td>${f.id}</td><td>${esc(f.code)}</td><td>${esc(f.name)}</td><td>${f.max_load_hours_per_week}</td>
+          <td>${unavailableLabel(f.unavailable_slot_ids)}</td>
+          <td class="actions-cell">
+            <button type="button" class="edit-btn" data-kind="faculty" data-id="${f.id}">Edit</button>
+            <button type="button" class="del-btn" data-kind="faculty" data-id="${f.id}">Delete</button>
+          </td>
+        </tr>`).join("");
       $("facultyTable").innerHTML = `
         <table>
-          <thead><tr><th>ID</th><th>Code</th><th>Name</th><th>Load</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="4" class="muted">No faculty yet</td></tr>`}</tbody>
+          <thead><tr><th>ID</th><th>Code</th><th>Name</th><th>Load</th><th>Unavailable</th><th>Actions</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="6" class="muted">No faculty yet</td></tr>`}</tbody>
         </table>`;
     }
 
     function renderBranches() {
       const rows = state.branches.map((b) => `
-        <tr><td>${b.id}</td><td>${esc(b.code)}</td><td>${esc(b.name)}</td><td>${esc(b.semester_label || "")}</td></tr>`).join("");
+        <tr>
+          <td>${b.id}</td><td>${esc(b.code)}</td><td>${esc(b.name)}</td><td>${esc(b.semester_label || "")}</td>
+          <td class="actions-cell"><button type="button" class="del-btn" data-kind="branch" data-id="${b.id}">Delete</button></td>
+        </tr>`).join("");
       $("branchTable").innerHTML = `
         <table>
-          <thead><tr><th>ID</th><th>Code</th><th>Name</th><th>Semester</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="4" class="muted">No branches yet</td></tr>`}</tbody>
+          <thead><tr><th>ID</th><th>Code</th><th>Name</th><th>Semester</th><th>Actions</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="5" class="muted">No branches yet</td></tr>`}</tbody>
         </table>`;
     }
 
@@ -300,12 +328,13 @@
                 ${division ? `<span class="muted">(${esc(branchLabel(division.branch_id))})</span>` : ""}</td>
             <td>${course ? `${esc(course.code)} <span class="muted">${esc(course.title)}</span>` : `#${a.course_id}`}</td>
             <td>${mapping}</td>
+            <td class="actions-cell"><button type="button" class="del-btn" data-kind="allocation" data-id="${a.id}">Delete</button></td>
           </tr>`;
       }).join("");
       $("allocationTable").innerHTML = `
         <table>
-          <thead><tr><th>ID</th><th>Division</th><th>Subject</th><th>Faculty mapping</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="4" class="muted">No allocations yet</td></tr>`}</tbody>
+          <thead><tr><th>ID</th><th>Division</th><th>Subject</th><th>Faculty mapping</th><th>Actions</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="5" class="muted">No allocations yet</td></tr>`}</tbody>
         </table>`;
     }
 
@@ -322,11 +351,12 @@
           <td>${d.id}</td><td>${esc(d.name)}</td><td><span class="tag">${esc(branchLabel(d.branch_id))}</span></td>
           <td>${esc(d.program)} &middot; sem ${d.semester}</td><td>${d.student_count}</td>
           <td class="muted">${esc(d.batch1_name || d.name + "1")} / ${esc(d.batch2_name || d.name + "2")}</td>
+          <td class="actions-cell"><button type="button" class="del-btn" data-kind="division" data-id="${d.id}">Delete</button></td>
         </tr>`).join("");
       $("divisionTable").innerHTML = `
         <table>
-          <thead><tr><th>ID</th><th>Name</th><th>Branch</th><th>Program</th><th>Students</th><th>Batches</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="6" class="muted">No divisions yet</td></tr>`}</tbody>
+          <thead><tr><th>ID</th><th>Name</th><th>Branch</th><th>Program</th><th>Students</th><th>Batches</th><th>Actions</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="7" class="muted">No divisions yet</td></tr>`}</tbody>
         </table>`;
     }
 
@@ -337,25 +367,27 @@
           <td><span class="tag">${esc(branchLabel(c.branch_id))}</span></td>
           <td>${esc(c.category)}</td><td>${c.credits}</td>
           <td>${c.theory_per_week}T / ${c.practical_per_week}P / ${c.tutorial_per_week}Tu${c.is_heavy ? ' <span class="tag">heavy</span>' : ""}</td>
+          <td class="actions-cell"><button type="button" class="del-btn" data-kind="course" data-id="${c.id}">Delete</button></td>
         </tr>`).join("");
       $("courseTable").innerHTML = `
         <table>
-          <thead><tr><th>ID</th><th>Code</th><th>Title</th><th>Branch</th><th>Category</th><th>Cr</th><th>Sessions/wk</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="7" class="muted">No subjects yet</td></tr>`}</tbody>
+          <thead><tr><th>ID</th><th>Code</th><th>Title</th><th>Branch</th><th>Category</th><th>Cr</th><th>Sessions/wk</th><th>Actions</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="8" class="muted">No subjects yet</td></tr>`}</tbody>
         </table>`;
     }
 
     function renderRooms() {
       const rows = state.rooms.map((r) => `
         <tr><td>${r.id}</td><td>${esc(r.code)}</td><td>${esc(r.name)}</td><td>${r.capacity}</td>
-        <td><span class="tag">${esc(r.room_type)}</span></td></tr>`).join("");
+        <td><span class="tag">${esc(r.room_type)}</span></td>
+        <td class="actions-cell"><button type="button" class="del-btn" data-kind="room" data-id="${r.id}">Delete</button></td></tr>`).join("");
       const labs = state.rooms.filter((r) => r.room_type === "lab").length;
       const warn = state.rooms.length && labs < 2
         ? `<div class="status bad">Only ${labs} lab room(s): batch-split practicals need at least 2.</div>` : "";
       $("roomTable").innerHTML = `
         <table>
-          <thead><tr><th>ID</th><th>Code</th><th>Name</th><th>Capacity</th><th>Type</th></tr></thead>
-          <tbody>${rows || `<tr><td colspan="5" class="muted">No rooms yet</td></tr>`}</tbody>
+          <thead><tr><th>ID</th><th>Code</th><th>Name</th><th>Capacity</th><th>Type</th><th>Actions</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="6" class="muted">No rooms yet</td></tr>`}</tbody>
         </table>${warn}`;
     }
 
@@ -382,6 +414,47 @@
       $("slotTable").innerHTML =
         `<table><thead>${head}</thead><tbody>${body}</tbody></table>
          <div class="status">${state.slots.length} slots across ${days.length} day(s).</div>`;
+    }
+
+    // Engine slot ids (what `faculty.unavailable_slot_ids` is interpreted against) are NOT the
+    // SlotTemplate DB row `id` from GET /api/slots. `webapp/problem_builder.py::build_problem_dict`
+    // builds them like this:
+    //   slot_rows = sorted(session.exec(select(SlotTemplate)).all(), key=lambda s: (s.day, s.period))
+    //   time_slots = [{"id": idx, ...} for idx, s in enumerate(slot_rows)]
+    // i.e. the engine id is the 0-based index of the slot in (day, period)-sorted order. GET
+    // /api/slots already happens to come back in that order, but we sort defensively here rather
+    // than trust it, since the picker silently pointing at the wrong period would be worse than no
+    // feature at all.
+    function sortedSlotsWithIndex() {
+      return [...state.slots]
+        .sort((a, b) => (a.day - b.day) || (a.period - b.period))
+        .map((slot, index) => ({ index, slot }));
+    }
+
+    function slotOptionLabel(slot) {
+      const day = DAY_NAMES[slot.day] || `Day ${slot.day}`;
+      return `${day} P${slot.period} ${slot.start}–${slot.end}`;
+    }
+
+    function renderUnavailableOptions() {
+      const select = $("facultyUnavailable");
+      if (!select) return;
+      const previous = new Set([...select.selectedOptions].map((o) => o.value));
+      select.innerHTML = sortedSlotsWithIndex()
+        .map(({ index, slot }) => `<option value="${index}">${esc(slotOptionLabel(slot))}</option>`)
+        .join("");
+      [...select.options].forEach((o) => { if (previous.has(o.value)) o.selected = true; });
+    }
+
+    function unavailableLabel(ids) {
+      if (!ids || !ids.length) return `<span class="muted">none</span>`;
+      const byIndex = new Map(sortedSlotsWithIndex().map(({ index, slot }) => [index, slot]));
+      const labels = [...ids].sort((a, b) => a - b).map((i) => {
+        const slot = byIndex.get(i);
+        return slot ? `${(DAY_NAMES[slot.day] || `D${slot.day}`)}P${slot.period}` : `#${i}`;
+      });
+      const preview = labels.slice(0, 4).join(", ") + (labels.length > 4 ? "…" : "");
+      return `<span class="tag">${ids.length}</span> <span class="muted">${esc(preview)}</span>`;
     }
 
     function fillSelect(select, items, toLabel, { placeholder, keepValue = true } = {}) {
@@ -428,6 +501,7 @@
       fillSelect($("allocBatch1Select"), state.faculty, facLabel, { placeholder: "Select faculty" });
       fillSelect($("allocBatch2Select"), state.faculty, facLabel, { placeholder: "Select faculty" });
       syncAllocationFields();
+      renderUnavailableOptions();
     }
 
     async function fetchJson(url, options) {
@@ -466,6 +540,37 @@
       refreshSelects();
     }
 
+    // Faculty editing: null = "add" mode; otherwise the id of the row being edited. The form and
+    // its multi-select double as the editor — Edit just preloads it, Cancel restores add-mode.
+    let editingFacultyId = null;
+
+    function startEditFaculty(id) {
+      const f = state.faculty.find((x) => x.id === id);
+      if (!f) return;
+      editingFacultyId = id;
+      const form = $("facultyForm");
+      form.code.value = f.code;
+      form.name.value = f.name;
+      form.max_load_hours_per_week.value = f.max_load_hours_per_week;
+      form.max_consecutive_sessions.value = f.max_consecutive_sessions;
+      const wanted = new Set((f.unavailable_slot_ids || []).map(String));
+      [...$("facultyUnavailable").options].forEach((o) => { o.selected = wanted.has(o.value); });
+      $("facultySubmitBtn").textContent = "Save changes";
+      $("facultyCancelEditBtn").style.display = "";
+      setStatus("facultyStatus", `Editing ${f.code} — submit to save, or cancel.`, "");
+    }
+
+    function cancelEditFaculty() {
+      editingFacultyId = null;
+      $("facultyForm").reset();
+      [...$("facultyUnavailable").options].forEach((o) => { o.selected = false; });
+      $("facultySubmitBtn").textContent = "Add faculty";
+      $("facultyCancelEditBtn").style.display = "none";
+      setStatus("facultyStatus", "", "");
+    }
+
+    $("facultyCancelEditBtn").addEventListener("click", cancelEditFaculty);
+
     $("facultyForm").addEventListener("submit", async (event) => {
       event.preventDefault();
       const form = new FormData(event.target);
@@ -474,16 +579,27 @@
         name: form.get("name"),
         max_load_hours_per_week: Number(form.get("max_load_hours_per_week") || 20),
         max_consecutive_sessions: Number(form.get("max_consecutive_sessions") || 2),
-        unavailable_slot_ids: [],
+        unavailable_slot_ids: form.getAll("unavailable_slot_ids").map(Number),
       };
       try {
-        await fetchJson("/api/faculty", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        event.target.reset();
-        setStatus("facultyStatus", "Faculty saved.", "ok");
+        if (editingFacultyId) {
+          const id = editingFacultyId;
+          await fetchJson(`/api/faculty/${id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          cancelEditFaculty();
+          setStatus("facultyStatus", `Faculty #${id} updated.`, "ok");
+        } else {
+          await fetchJson("/api/faculty", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          event.target.reset();
+          setStatus("facultyStatus", "Faculty saved.", "ok");
+        }
         await loadAll();
       } catch (error) {
         setStatus("facultyStatus", error.message || String(error), "bad");
@@ -658,6 +774,116 @@
         await loadAll();
       } catch (error) {
         setStatus("slotStatus", error.message || String(error), "bad");
+      }
+    });
+
+    // --- Row deletion -------------------------------------------------------------------------
+    // One delegated click listener (below) handles every table's Delete button via this config,
+    // rather than wiring per-row listeners that would need re-attaching on every re-render.
+    function branchDeleteMessage(b) {
+      const divIds = new Set(state.divisions.filter((d) => d.branch_id === b.id).map((d) => d.id));
+      const divCount = divIds.size;
+      const allocCount = state.allocations.filter((a) => divIds.has(a.division_id)).length;
+      const courseCount = state.courses.filter((c) => c.branch_id === b.id).length;
+      return `Delete branch "${b.code} — ${b.name}"? This cascades: ${divCount} division(s), `
+        + `${allocCount} allocation(s) in those divisions, and ${courseCount} subject(s) will also `
+        + `be deleted. This cannot be undone.`;
+    }
+
+    function divisionDeleteMessage(d) {
+      const allocCount = state.allocations.filter((a) => a.division_id === d.id).length;
+      return `Delete division "${d.name}"? This also deletes ${allocCount} allocation(s) for this `
+        + `division. This cannot be undone.`;
+    }
+
+    function courseDeleteMessage(c) {
+      const allocCount = state.allocations.filter((a) => a.course_id === c.id).length;
+      return `Delete subject "${c.code} — ${c.title}"? This also deletes ${allocCount} `
+        + `allocation(s) referencing it. This cannot be undone.`;
+    }
+
+    const DELETE_CONFIG = {
+      faculty: {
+        find: (id) => state.faculty.find((x) => x.id === id),
+        url: (id) => `/api/faculty/${id}`,
+        statusId: "facultyStatus",
+        confirmMessage: (item) => `Delete faculty "${item.code} — ${item.name}"?`,
+        beforeDelete: (id) => { if (editingFacultyId === id) cancelEditFaculty(); },
+        successText: (item) => `Deleted faculty ${item.code}.`,
+      },
+      branch: {
+        find: (id) => state.branches.find((x) => x.id === id),
+        url: (id) => `/api/branches/${id}`,
+        statusId: "branchStatus",
+        confirmMessage: branchDeleteMessage,
+        successText: (item) => `Deleted branch ${item.code} and its dependents.`,
+      },
+      division: {
+        find: (id) => state.divisions.find((x) => x.id === id),
+        url: (id) => `/api/divisions/${id}`,
+        statusId: "divisionStatus",
+        confirmMessage: divisionDeleteMessage,
+        successText: (item) => `Deleted division ${item.name}.`,
+      },
+      course: {
+        find: (id) => state.courses.find((x) => x.id === id),
+        url: (id) => `/api/courses/${id}`,
+        statusId: "courseStatus",
+        confirmMessage: courseDeleteMessage,
+        successText: (item) => `Deleted subject ${item.code}.`,
+      },
+      room: {
+        find: (id) => state.rooms.find((x) => x.id === id),
+        url: (id) => `/api/rooms/${id}`,
+        statusId: "roomStatus",
+        confirmMessage: (item) => `Delete room "${item.code} — ${item.name}"?`,
+        successText: (item) => `Deleted room ${item.code}.`,
+      },
+      allocation: {
+        find: (id) => state.allocations.find((x) => x.id === id),
+        url: (id) => `/api/allocations/${id}`,
+        statusId: "allocationStatus",
+        confirmMessage: () => "Delete this allocation?",
+        successText: () => "Deleted allocation.",
+      },
+    };
+
+    async function handleDelete(kind, id) {
+      const cfg = DELETE_CONFIG[kind];
+      if (!cfg) return;
+      const item = cfg.find(id);
+      if (!item) return;
+      if (!confirm(cfg.confirmMessage(item))) return;
+      if (cfg.beforeDelete) cfg.beforeDelete(id);
+      try {
+        // All delete endpoints return {"deleted": id} on success; faculty additionally 400s with
+        // a plain-English detail message while an allocation still references it — surfaced as-is
+        // via fetchJson's rejection (it throws with `text` = the response body) rather than a
+        // generic failure string.
+        await fetchJson(cfg.url(id), { method: "DELETE" });
+        setStatus(cfg.statusId, cfg.successText(item), "ok");
+        await loadAll();
+      } catch (error) {
+        let message = error.message || String(error);
+        try {
+          const parsed = JSON.parse(message);
+          if (parsed && parsed.detail) message = parsed.detail;
+        } catch (_parseError) {
+          // not JSON — show the raw error text as-is
+        }
+        setStatus(cfg.statusId, message, "bad");
+      }
+    }
+
+    document.addEventListener("click", (event) => {
+      const editBtn = event.target.closest(".edit-btn");
+      if (editBtn && editBtn.dataset.kind === "faculty") {
+        startEditFaculty(Number(editBtn.dataset.id));
+        return;
+      }
+      const delBtn = event.target.closest(".del-btn");
+      if (delBtn) {
+        handleDelete(delBtn.dataset.kind, Number(delBtn.dataset.id));
       }
     });
 

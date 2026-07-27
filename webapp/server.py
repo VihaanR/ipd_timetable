@@ -38,7 +38,7 @@ from sqlmodel import Session
 
 from webapp.db import init_db, get_engine
 from webapp.jobs import sweep_stale_running
-from webapp.routers import branches, faculty, courses, rooms, allocations, slots, runs
+from webapp.routers import branches, faculty, courses, rooms, allocations, slots, runs, calendar
 from webapp import seed
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -50,6 +50,7 @@ _LAST = {"problem": None, "solution": None, "label": None}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()  # create SQLite tables if the platform DB is new (design.md §4.1)
+    calendar.get_upload_dir()  # ensure webapp/uploads/ exists (design.md §6, CLAUDE.md §15)
     with Session(get_engine()) as session:
         sweep_stale_running(session)  # fail any "running" row orphaned by a previous restart
     yield
@@ -60,7 +61,7 @@ app = FastAPI(title="NEP Timetable Platform", lifespan=lifespan)
 # platform entity CRUD (P1) + generate job/runs (P2). The legacy showcase endpoints below stay
 # until the SPA pages land.
 for _router in (branches.router, faculty.router, courses.router, rooms.router,
-                allocations.router, slots.router, seed.router, runs.router):
+                allocations.router, slots.router, seed.router, runs.router, calendar.router):
     app.include_router(_router)
 
 

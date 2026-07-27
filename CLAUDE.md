@@ -79,11 +79,18 @@ design.md            Full platform design spec (architecture, API, schema, roadm
 > + xlsx/pdf export + `POST /api/runs/{id}/adjust` holiday/rain overlay); a **`/platform` SPA page**
 > (`static/platform.html`+`platform.js`) driving seed→readiness→generate→view→export→adjust; and the
 > **§16 scoring refinements** (per-day break variety + `day_span` compact-day term, in `scoring.py` +
-> mirrored in `cpsat.py`). **Not yet built:** entity-CRUD frontend forms (faculty/subjects/etc. are
-> API-only — no data-entry UI), `extract_calendar.py` + calendar router (P3), the DJSCE light theme
-> (P5), and the remaining design-change decisions (disruption **full re-solve** — `/adjust` is still
-> the minimal-change patcher that drops un-relocatable sessions — plus compare mode + undo; see
-> design.md §7/§5.3). **Note:** DB-backed generate lives at `POST /api/runs` (not `/api/generate`,
+> mirrored in `cpsat.py`); a **`/dashboard` entity data-entry page** (`static/dashboard.html`, self-
+> contained inline CSS/JS) covering faculty/branches/divisions/subjects/allocations/rooms/slot-grid
+> with per-row delete, faculty edit, and an unavailable-slots picker; **compare mode** (`POST
+> /api/compare` with a selectable `solvers` list + the comparison-table UI on `/platform`); **P3
+> calendar backend** (`extract_calendar.py` + `routers/calendar.py` = upload with magic-byte/pillow/
+> pypdf validation + 20 MB cap, term & event CRUD, human-confirm gate, optional Claude-vision
+> extraction that 501s without `ANTHROPIC_API_KEY`); and the **P5 DJSCE light theme** (`style.css`
+> navy `#003877` / orange `#f26d21`). **Not yet built:** the disruption **full re-solve** (design.md
+> §7 — `/adjust` is still the minimal-change patcher that drops un-relocatable sessions), the
+> calendar **UI** (backend is API-only so far), and adjustment undo/persistence (the `adjustment`
+> table + `POST /api/adjustments/{id}/revert`; `/platform` currently reverts client-side only).
+> **Note:** DB-backed generate lives at `POST /api/runs` (not `/api/generate`,
 > the legacy in-memory showcase at `/`). The DB-backed adjust is `POST /api/runs/{id}/adjust`.
 
 **Engine data flow:** `ProblemInstance` → `expand_requirements()` → ordered

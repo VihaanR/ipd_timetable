@@ -190,7 +190,14 @@ allocations. This turns the currently-hardcoded dataset into an onboarding fixtu
 then everything is editable in the browser. Refuses to run twice unless `?force=true` (wipes and
 re-seeds).
 
-### 5.2 Calendar
+### 5.2 Calendar — ✅ BACKEND IMPLEMENTED (2026-07-21), UI still to build
+
+All routes below are built and tested (`webapp/routers/calendar.py`, `webapp/extract_calendar.py`,
+`tests/test_api_calendar.py` — 19 tests). Dates are stored as ISO-8601 **strings** (matching
+`slot_template.start`/`end`), not SQL date columns. The upload directory is overridable via
+`TIMETABLE_UPLOADS_PATH` (mirroring `webapp/db.py`'s `TIMETABLE_DB_PATH`) so tests never write into
+`webapp/uploads/`. **Not yet built: the Calendar page in the browser** — the backend is API-only so
+far, so R3's side-by-side upload/preview/review UI (§6 Layer 0) remains outstanding.
 
 | Route | Behavior |
 |-------|----------|
@@ -210,7 +217,7 @@ re-seeds).
 | `GET /api/runs/{id}` | `{status, hard, soft, grids, stage_reports, error}` — UI polls every 2 s |
 | `GET /api/runs` | Run history (id, label, solver, status, scores, created_at) |
 | `GET /api/runs/{id}/export.xlsx` / `.pdf` | Reconstructs `ProblemInstance` from the snapshot + solution and calls the existing `export.py` |
-| `POST /api/runs {solver: "compare", solvers: ["cpsat","pipeline","greedy"], time_limit, label?}` | **⚠️ DESIGN-ONLY — NOT YET IMPLEMENTED (as of P2, 2026-07-21).** The as-built `POST /api/runs` accepts a single `solver` (`pipeline` or a `SOLVERS` key) and rejects `"compare"` with 400; the request model has no `solvers` field. **When built (a "design-change decisions" task, separate from P2):** runs each solver named in `solvers` on the same problem snapshot in one job; the run row stores one solution/grid/score per selected solver, keyed by name; UI renders a comparison table (`hard`/`soft`/`wall_clock_seconds` per solver) plus tabs to view each grid — the live version of the CLAUDE.md §13 benchmark table |
+| `POST /api/compare {solvers: ["cpsat","pipeline","greedy"], time_limit, label?, branch_ids?}` | **✅ IMPLEMENTED (2026-07-21).** Landed as its own endpoint rather than a `solver: "compare"` mode on `POST /api/runs`, because it is **synchronous and creates no run row** (so it has no `run_id`, no history entry, and no export links — unlike the background-job generate flow). Runs each solver named in `solvers` on the same problem snapshot and returns `{solvers, best_index, best_solver, results: [{solver, status, hard_violations, soft_cost, wall_clock_s, stage_reports, grids}]}`; duplicates are collapsed and an omitted/empty list defaults to all three. The `/platform` UI renders the comparison table (winner badged, hard-violation cells colour-coded) plus solver and division tabs over each grid — the live version of the CLAUDE.md §13 benchmark table. Its state is kept entirely separate from the generated run so the Adjust panel still operates on the real run |
 
 The solver code is synchronous; a background task with a sync function runs in Starlette's
 threadpool, so the event loop stays responsive. **Solver choices exposed (revised 2026-07-21):**
@@ -434,7 +441,17 @@ framework migration is not foreclosed because the API is the contract.
    per active overlay (instantly reverts to baseline/prior overlay, no re-solve) and a **Re-apply**
    shortcut on reverted ones (§7 Undo).
 
-### 8.2 DJ Sanghvi palette (light theme; extracted from djsce.ac.in CSS — no logo per Goal.md)
+### 8.2 DJ Sanghvi palette — ✅ IMPLEMENTED (2026-07-21)
+
+Applied in `webapp/static/style.css`; the variable table below is as-built. Two deliberate
+deviations, both for contrast (WCAG AA): the `.logo` chip is **orange** (navy-on-navy would vanish
+in the now-navy topbar), and `#adjustBtn` keeps **dark** text because it sits on orange
+(black-on-orange ≈7:1 vs white-on-orange ≈3:1) — only navy-backed buttons got white text. Session
+fills were re-tinted for white panels and the topbar's `.sub`/`.dataset-label` are overridden to
+white, since `--muted` grey would be illegible on navy. `webapp/static/dashboard.html` keeps its own
+self-contained light theme and is intentionally not unified with this stylesheet.
+
+(light theme; extracted from djsce.ac.in CSS — no logo per Goal.md)
 
 Brand tokens: navy `#003877` (dominant), orange `#f26d21` (single accent), white, black, greys
 `#5f5f5f`/`#58595b`, light greys `#dedede`/`#f5f5f5`/`#f6f7f8`.

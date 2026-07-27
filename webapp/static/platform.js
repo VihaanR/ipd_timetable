@@ -13,8 +13,16 @@ let pollTimer = null;
 let originalGrids = null;          // the un-adjusted run grids, so "Restore original" can revert
 let movedIds = new Set();          // session ids relocated by the last adjustment (for highlighting)
 
+// Compare-solvers panel state. Kept entirely separate from currentGrids/activeDivision/movedIds
+// above: /api/compare is a one-shot synchronous call that never creates a run, so it must never
+// disturb the generated run that the adjust panel operates on.
+let compareResults = null;         // results[] from the last successful /api/compare response
+let compareActiveSolver = 0;       // index into compareResults for the active solver tab
+let compareActiveDivision = 0;     // division tab index within the active solver's grids
+
 $("seedBtn").addEventListener("click", loadSeed);
 $("generateBtn").addEventListener("click", generate);
+$("compareBtn").addEventListener("click", runCompare);
 $("adjustBtn").addEventListener("click", adjust);
 $("restoreBtn").addEventListener("click", restoreOriginal);
 $("adjScope").addEventListener("change", () => {
@@ -217,30 +225,42 @@ function renderStages(stages) {
   });
 }
 
-function renderTabs() {
-  const tabs = $("tabs");
-  if (!currentGrids || !currentGrids.divisions || currentGrids.divisions.length === 0) {
-    tabs.style.display = "none";
+// Generic division-tab renderer: shared by the generate/adjust flow (#tabs, currentGrids) and the
+// compare panel (#compareTabs / #compareDivTabs, compareResults[i].grids) so both reuse the exact
+// same tab markup/behaviour without either touching the other's state.
+function renderDivisionTabs(container, grids, activeIdx, onSelect) {
+  if (!grids || !grids.divisions || grids.divisions.length === 0) {
+    container.style.display = "none";
+    container.innerHTML = "";
     return;
   }
-  tabs.style.display = "flex";
-  tabs.innerHTML = "";
-  currentGrids.divisions.forEach((div, i) => {
+  container.style.display = "flex";
+  container.innerHTML = "";
+  grids.divisions.forEach((div, i) => {
     const t = document.createElement("div");
-    t.className = "tab" + (i === activeDivision ? " active" : "");
+    t.className = "tab" + (i === activeIdx ? " active" : "");
     t.textContent = "Division " + div.id;
-    t.onclick = () => { activeDivision = i; renderTabs(); renderGrid(); };
-    tabs.appendChild(t);
+    t.onclick = () => onSelect(i);
+    container.appendChild(t);
   });
 }
 
-function renderGrid() {
-  const g = currentGrids;
-  if (!g || !g.divisions || g.divisions.length === 0) {
-    $("gridArea").innerHTML = "";
-    return;
-  }
-  const div = g.divisions[activeDivision];
+function renderTabs() {
+  renderDivisionTabs($("tabs"), currentGrids, activeDivision, (i) => {
+    activeDivision = i;
+    renderTabs();
+    renderGrid();
+  });
+}
+
+// Generic grid-table builder: pure function of (grids, activeIdx, movedSet) -> <table> or null.
+// The generate/adjust flow calls it through renderGrid() below (movedSet = the module-level
+// movedIds, so adjustment highlighting keeps working exactly as before). The compare panel calls
+// it directly with an empty moved-set (compare results are never "adjusted").
+function buildGridTable(grids, activeIdx, movedSet) {
+  if (!grids || !grids.divisions || grids.divisions.length === 0) return null;
+  const g = grids;
+  const div = g.divisions[activeIdx];
   const table = document.createElement("table");
   table.className = "tt";
 
@@ -267,7 +287,7 @@ function renderGrid() {
         entries.forEach((e) => {
           const s = document.createElement("div");
           s.className = "session " + (TYPE_CLASS[e.type] || "theory") +
-            (movedIds.has(e.session_id) ? " moved" : "");
+            (movedSet.has(e.session_id) ? " moved" : "");
           if (e.is_break) {
             s.innerHTML = `<div class="s-course">BREAK</div>`;
           } else {
@@ -286,12 +306,152 @@ function renderGrid() {
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
-
-  $("gridArea").innerHTML = "";
-  $("gridArea").appendChild(table);
+  return table;
 }
 
-// ---------------------------------------------------------------- 5. holiday / rain adjustment
+function renderGrid() {
+  const table = buildGridTable(currentGrids, activeDivision, movedIds);
+  $("gridArea").innerHTML = "";
+  if (table) $("gridArea").appendChild(table);
+}
+
+// ---------------------------------------------------------------- 5. compare solvers
+// POST /api/compare is a single synchronous request that runs N solvers back-to-back (no
+// background job, no run row, no history entry, no export links) — very different from the
+// generate flow's queue-and-poll pattern. It never touches currentGrids/currentRunId/movedIds;
+// its own state (compareResults/compareActiveSolver/compareActiveDivision) is entirely separate
+// so the adjust panel keeps operating on the real generated run regardless of what's compared.
+function selectedCompareSolvers() {
+  const solvers = [];
+  if ($("cmpCpsat").checked) solvers.push("cpsat");
+  if ($("cmpPipeline").checked) solvers.push("pipeline");
+  if ($("cmpGreedy").checked) solvers.push("greedy");
+  return solvers;
+}
+
+async function runCompare() {
+  const solvers = selectedCompareSolvers();
+  if (solvers.length < 2) {
+    $("compareStatus").textContent =
+      "pick at least 2 solvers to compare — a single solver is just Generate above.";
+    return;
+  }
+
+  const btn = $("compareBtn");
+  btn.disabled = true;
+  $("compareResultWrap").style.display = "none";
+  $("compareStatus").textContent =
+    `running ${solvers.length} solver(s) (${solvers.join(", ")}) back-to-back — this can take a ` +
+    `while (cpsat/pipeline may each take 20–60s)…`;
+
+  const payload = {
+    time_limit: parseFloat($("compareTimeLimit").value) || 20,
+    label: "",
+    branch_ids: null,
+    solvers,
+  };
+
+  try {
+    const res = await fetch("/api/compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (res.status === 400) {
+      const body = await res.json();
+      const detail = body.detail;
+      if (Array.isArray(detail)) {
+        const items = detail.map((d) => `<li>${d}</li>`).join("");
+        $("compareStatus").innerHTML = `<b>Not ready to generate:</b><ul>${items}</ul>`;
+      } else {
+        $("compareStatus").textContent = "error: " + String(detail);
+      }
+      return;
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error("HTTP " + res.status + " — " + text.slice(0, 300));
+    }
+    const data = await res.json();
+    compareResults = data.results;
+    compareActiveSolver = typeof data.best_index === "number" ? data.best_index : 0;
+    compareActiveDivision = 0;
+
+    $("compareStatus").textContent =
+      `done — compared ${data.solvers.length} solver(s); winner: ${data.best_solver}.`;
+    renderCompareTable(data);
+    $("compareResultWrap").style.display = "block";
+    renderCompareSolverTabs();
+    renderCompareDivisionTabs();
+    renderCompareGrid();
+  } catch (e) {
+    $("compareStatus").textContent = "error: " + (e.message || e);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderCompareTable(data) {
+  const body = $("compareTableBody");
+  body.innerHTML = "";
+  data.results.forEach((r, i) => {
+    const tr = document.createElement("tr");
+    const isBest = i === data.best_index;
+    if (isBest) tr.className = "compare-winner";
+    const hardClass = r.hard_violations === 0 ? "good" : "bad";
+    const soft = typeof r.soft_cost === "number" ? r.soft_cost.toFixed(1) : r.soft_cost;
+    const wall = typeof r.wall_clock_s === "number" ? r.wall_clock_s.toFixed(1) : r.wall_clock_s;
+    tr.innerHTML =
+      `<td>${r.solver}${isBest ? ' <span class="compare-badge">best</span>' : ""}</td>` +
+      `<td>${r.status}</td>` +
+      `<td><span class="stat-val ${hardClass}" style="font-size:14px">${r.hard_violations}</span></td>` +
+      `<td>${soft}</td>` +
+      `<td>${wall}</td>`;
+    body.appendChild(tr);
+  });
+}
+
+function renderCompareSolverTabs() {
+  const tabs = $("compareTabs");
+  if (!compareResults || compareResults.length === 0) {
+    tabs.style.display = "none";
+    tabs.innerHTML = "";
+    return;
+  }
+  tabs.style.display = "flex";
+  tabs.innerHTML = "";
+  compareResults.forEach((r, i) => {
+    const t = document.createElement("div");
+    t.className = "tab" + (i === compareActiveSolver ? " active" : "");
+    t.textContent = r.solver;
+    t.onclick = () => {
+      compareActiveSolver = i;
+      compareActiveDivision = 0;
+      renderCompareSolverTabs();
+      renderCompareDivisionTabs();
+      renderCompareGrid();
+    };
+    tabs.appendChild(t);
+  });
+}
+
+function renderCompareDivisionTabs() {
+  const active = compareResults ? compareResults[compareActiveSolver] : null;
+  renderDivisionTabs($("compareDivTabs"), active ? active.grids : null, compareActiveDivision, (i) => {
+    compareActiveDivision = i;
+    renderCompareDivisionTabs();
+    renderCompareGrid();
+  });
+}
+
+function renderCompareGrid() {
+  const active = compareResults ? compareResults[compareActiveSolver] : null;
+  const table = buildGridTable(active ? active.grids : null, compareActiveDivision, new Set());
+  $("compareGridArea").innerHTML = "";
+  if (table) $("compareGridArea").appendChild(table);
+}
+
+// ---------------------------------------------------------------- 6. holiday / rain adjustment
 async function adjust() {
   if (!currentRunId) return;
   const btn = $("adjustBtn");
@@ -343,7 +503,7 @@ function restoreOriginal() {
   $("restoreBtn").style.display = "none";
 }
 
-// ---------------------------------------------------------------- 6. history
+// ---------------------------------------------------------------- 7. history
 async function loadHistory() {
   try {
     const res = await fetch("/api/runs");

@@ -209,3 +209,74 @@ class TimetableRun(SQLModel, table=True):
     soft: Optional[float] = None
     wall_clock: Optional[float] = None    # total solve wall-clock seconds (pipeline total, or solver's)
     error: Optional[str] = None
+
+
+# --------------------------------------------------------------------------- term (P3)
+# Dates are stored as ISO-8601 strings ("YYYY-MM-DD"), matching SlotTemplate's start/end
+# convention above (plain strings, not SQLAlchemy Date columns) - keeps the schema portable and
+# side-steps driver-specific date-adapter behavior for a field the engine never touches directly
+# (the engine has no date axis - CLAUDE.md §12/design.md §12).
+class TermBase(SQLModel):
+    name: str                       # "Sem IV Jan-May 2026"
+    start_date: str                 # ISO date "YYYY-MM-DD"
+    end_date: str                   # ISO date "YYYY-MM-DD"
+
+
+class Term(TermBase, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+
+class TermCreate(TermBase):
+    pass
+
+
+class TermUpdate(SQLModel):
+    name: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+
+# --------------------------------------------------------------------------- calendar_upload (P3)
+# The raw artifact record - design.md §4.2: "never modified or deleted by parsing". No Update/
+# Create-from-JSON schema: rows are only ever inserted by the multipart upload handler in
+# webapp/routers/calendar.py, and are otherwise read-only.
+class CalendarUploadBase(SQLModel):
+    filename: str
+    mime: str                       # detected from magic bytes, not the client's claimed type
+    path: str                       # absolute path under webapp/uploads/ (or TIMETABLE_UPLOADS_PATH)
+    sha256: str
+
+
+class CalendarUpload(CalendarUploadBase, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    uploaded_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+# --------------------------------------------------------------------------- calendar_event (P3)
+# Trust rule (CLAUDE.md §12/design.md §6): machine-extracted data is never trusted. Only
+# webapp/routers/calendar.py's confirm endpoint may ever set confirmed=True; the extraction path
+# and the manual-create path both always insert confirmed=False, enforced in the router, not here.
+class CalendarEventBase(SQLModel):
+    term_id: int = Field(foreign_key="term.id", index=True)
+    date: str                       # ISO date "YYYY-MM-DD"
+    name: str
+    kind: str = "holiday"           # "holiday" | "exam" | "event"
+    source: str = "manual"          # "manual" | "extracted"
+    confirmed: bool = False
+
+
+class CalendarEvent(CalendarEventBase, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+
+class CalendarEventCreate(CalendarEventBase):
+    pass
+
+
+class CalendarEventUpdate(SQLModel):
+    # No `source` or `confirmed` here by design: provenance is fixed at creation, and confirmation
+    # only ever happens through PUT /api/calendar/events/{id}/confirm (the trust rule's one door).
+    term_id: Optional[int] = None
+    date: Optional[str] = None
+    name: Optional[str] = None
+    kind: Optional[str] = None
