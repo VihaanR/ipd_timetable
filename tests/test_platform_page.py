@@ -29,3 +29,11 @@ def test_platform_page_served(client):
 def test_legacy_showcase_still_served(client):
     r = client.get("/")
     assert r.status_code == 200
+
+
+def test_dashboard_page_served(client):
+    """The entity data-entry dashboard (faculty/branches/divisions/subjects/allocations/rooms/slots)."""
+    r = client.get("/dashboard")
+    assert r.status_code == 200
+    for heading in ("Faculty", "Branches", "Divisions", "Subjects", "Allocations", "Rooms"):
+        assert heading in r.text, f"dashboard missing {heading} section"

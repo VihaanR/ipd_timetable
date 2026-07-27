@@ -119,6 +119,49 @@ def test_list_runs_after_generate(client):
     assert any(entry["id"] == run_id for entry in runs)
 
 
+def test_compare_mode_returns_multiple_solver_results(client):
+    _seed(client)
+    r = client.post(
+        "/api/compare",
+        json={"time_limit": 3, "solvers": ["greedy", "cpsat"]},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["results"] and len(body["results"]) == 2
+    assert body["best_solver"] in {"greedy", "cpsat"}
+    assert isinstance(body["best_index"], int)
+    assert body["results"][0]["grids"]
+
+
+def test_compare_mode_rejects_invalid_solver(client):
+    _seed(client)
+    r = client.post(
+        "/api/compare",
+        json={"time_limit": 3, "solvers": ["greedy", "banana"]},
+    )
+    assert r.status_code == 400
+
+
+def test_compare_mode_pipeline_solver_runs(client):
+    """`pipeline` is in compare's DEFAULT solver list, so it must actually execute — regression for
+    run_pipeline/PipelineConfig being used in the compare path without being imported (NameError)."""
+    _seed(client)
+    r = client.post("/api/compare", json={"time_limit": 2, "solvers": ["pipeline"]})
+    assert r.status_code == 200, r.text
+    result = r.json()["results"][0]
+    assert result["solver"] == "pipeline"
+    assert result["stage_reports"]      # pipeline reports its per-stage track
+    assert result["grids"]
+
+
+def test_compare_mode_dedupes_and_defaults(client):
+    _seed(client)
+    dupes = client.post("/api/compare", json={"time_limit": 2, "solvers": ["greedy", "greedy"]})
+    assert dupes.status_code == 200, dupes.text
+    assert dupes.json()["solvers"] == ["greedy"]      # duplicates collapsed
+    assert client.post("/api/compare", json={"time_limit": 2, "solvers": []}).status_code == 200
+
+
 def test_export_xlsx_of_done_run(client):
     _seed(client)
     run_id = client.post("/api/runs", json={"solver": "greedy", "time_limit": 3}).json()["run_id"]

@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Timetable Dashboard</title>
+<style>
+  :root {
+    --bg: #f3f6fb;
+    --panel: #ffffff;
+    --panel-soft: #eef3fa;
+    --text: #172033;
+    --muted: #63708a;
+    --line: #d8e0ee;
+    --accent: #0f6cbd;
+    --accent-2: #124578;
+    --good: #157347;
+    --bad: #b42318;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
+    color: var(--text);
+    background:
+      radial-gradient(circle at top left, rgba(15,108,189,0.14), transparent 30%),
+      linear-gradient(180deg, #fbfcff 0%, var(--bg) 100%);
+  }
+  a { color: inherit; text-decoration: none; }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 24px; }
+  .hero {
+    display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    align-items: end; padding: 24px; border: 1px solid var(--line); border-radius: 22px;
+    background: linear-gradient(135deg, #ffffff, #eef4ff);
+    box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+  }
+  .brand { display: flex; gap: 14px; align-items: center; }
+  .logo {
+    width: 52px; height: 52px; border-radius: 16px; display: grid; place-items: center;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff;
+    font-weight: 800; letter-spacing: 0.04em;
+  }
+  h1 { margin: 0; font-size: 28px; }
+  .sub { margin: 4px 0 0; color: var(--muted); }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  .btn, button {
+    border: 0; border-radius: 12px; padding: 12px 16px; cursor: pointer; font-weight: 700;
+  }
+  .btn.primary, button { background: var(--accent); color: white; }
+  .btn.secondary { background: var(--panel-soft); color: var(--text); }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; margin-top: 18px;
+  }
+  .card {
+    background: rgba(255,255,255,0.9); border: 1px solid var(--line); border-radius: 20px;
+    padding: 18px; box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+  }
+  .card h2 { margin: 0 0 12px; font-size: 18px; }
+  .hint { color: var(--muted); font-size: 13px; margin-bottom: 12px; line-height: 1.5; }
+  form { display: grid; gap: 10px; margin-bottom: 14px; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  input, select {
+    width: 100%; border: 1px solid var(--line); border-radius: 12px; padding: 11px 12px;
+    font: inherit; background: #fff;
+  }
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: 6px; }
+  .field { display: flex; flex-direction: column; }
+  .status { margin-top: 6px; color: var(--muted); font-size: 13px; min-height: 18px; }
+  .status.ok { color: var(--good); font-weight: 600; }
+  .status.bad { color: var(--bad); font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
+  tbody tr:hover { background: #f9fbff; }
+  .tag { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 999px; background: var(--panel-soft); font-size: 12px; }
+  .muted { color: var(--muted); }
+  .two-up { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; }
+  @media (max-width: 960px) { .two-up { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="hero">
+      <div class="brand">
+        <div class="logo">TT</div>
+        <div>
+          <h1>Faculty / Branch / Allocation Dashboard</h1>
+          <p class="sub">Backend-backed setup screen for the timetable engine</p>
+        </div>
+      </div>
+      <div class="actions">
+        <a class="btn secondary" href="/">Main UI</a>
+        <a class="btn secondary" href="/platform">Generate UI</a>
+        <button id="refreshAllBtn" class="primary">Refresh data</button>
+      </div>
+    </header>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Faculty</h2>
+        <p class="hint">Add teachers here. These IDs are used in allocations and timetable generation.</p>
+        <form id="facultyForm">
+          <div class="fields">
+            <div class="field"><label>Code</label><input name="code" placeholder="AR" required></div>
+            <div class="field"><label>Name</label><input name="name" placeholder="A. R. Teacher" required></div>
+            <div class="field"><label>Max load hours</label><input name="max_load_hours_per_week" type="number" value="20" min="1" required></div>
+            <div class="field"><label>Max consecutive</label><input name="max_consecutive_sessions" type="number" value="2" min="1" required></div>
+          </div>
+          <button type="submit">Add faculty</button>
+        </form>
+        <div class="status" id="facultyStatus"></div>
+        <div id="facultyTable"></div>
+      </section>
+
+      <section class="card">
+        <h2>Branches</h2>
+        <p class="hint">Branches group divisions and courses. Divisions are created through the branch API.</p>
+        <form id="branchForm">
+          <div class="fields">
+            <div class="field"><label>Code</label><input name="code" placeholder="CSE" required></div>
+            <div class="field"><label>Name</label><input name="name" placeholder="Computer Engineering" required></div>
+            <div class="field"><label>Semester label</label><input name="semester_label" placeholder="Sem IV"></div>
+          </div>
+          <button type="submit">Add branch</button>
+        </form>
+        <div class="status" id="branchStatus"></div>
+        <div id="branchTable"></div>
+      </section>
+    </div>
+
+    <div class="grid" style="margin-top: 18px;">
+      <section class="card">
+        <h2>Divisions</h2>
+        <p class="hint">Class sections (D1, D2&hellip;) inside a branch. Each splits into two batches for labs; leave batch names blank to default to <span class="tag">D11</span> / <span class="tag">D12</span>.</p>
+        <form id="divisionForm">
+          <div class="fields">
+            <div class="field"><label>Branch</label><select name="branch_id" id="divisionBranchSelect" required></select></div>
+            <div class="field"><label>Name</label><input name="name" placeholder="D1" required></div>
+            <div class="field"><label>Program</label>
+              <select name="program">
+                <option value="FYUP">FYUP</option><option value="BEd">BEd</option>
+                <option value="MEd">MEd</option><option value="ITEP">ITEP</option>
+              </select>
+            </div>
+            <div class="field"><label>Semester</label><input name="semester" type="number" value="4" min="1" max="10" required></div>
+            <div class="field"><label>Students</label><input name="student_count" type="number" value="60" min="1" required></div>
+            <div class="field"><label>Batch 1 name</label><input name="batch1_name" placeholder="D11"></div>
+            <div class="field"><label>Batch 2 name</label><input name="batch2_name" placeholder="D12"></div>
+          </div>
+          <button type="submit">Add division</button>
+        </form>
+        <div class="status" id="divisionStatus"></div>
+        <div id="divisionTable"></div>
+      </section>
+
+      <section class="card">
+        <h2>Subjects</h2>
+        <p class="hint">Per-branch courses. Sessions/week drive the timetable: each practical becomes a 2-hour batch-split lab. At least one of theory/practical/tutorial must be &gt; 0.</p>
+        <form id="courseForm">
+          <div class="fields">
+            <div class="field"><label>Branch</label><select name="branch_id" id="courseBranchSelect" required></select></div>
+            <div class="field"><label>Code</label><input name="code" placeholder="DS" required></div>
+            <div class="field"><label>Title</label><input name="title" placeholder="Data Structures" required></div>
+            <div class="field"><label>Credits</label><input name="credits" type="number" value="3" min="1" max="12" required></div>
+            <div class="field"><label>Category</label>
+              <select name="category">
+                <option value="Major">Major</option><option value="Minor">Minor</option>
+                <option value="Skill-Based">Skill-Based</option>
+                <option value="Ability-Enhancement">Ability-Enhancement</option>
+                <option value="Value-Added">Value-Added</option>
+                <option value="Open-Elective">Open-Elective</option>
+                <option value="Teaching-Practice">Teaching-Practice</option>
+                <option value="Fieldwork">Fieldwork</option>
+                <option value="Internship">Internship</option>
+                <option value="Project">Project</option>
+              </select>
+            </div>
+            <div class="field"><label>Theory / week</label><input name="theory_per_week" type="number" value="3" min="0" max="10" required></div>
+            <div class="field"><label>Practical / week</label><input name="practical_per_week" type="number" value="0" min="0" max="10" required></div>
+            <div class="field"><label>Tutorial / week</label><input name="tutorial_per_week" type="number" value="0" min="0" max="10" required></div>
+            <div class="field"><label>Heavy subject</label><select name="is_heavy"><option value="false">No</option><option value="true">Yes</option></select></div>
+          </div>
+          <button type="submit">Add subject</button>
+        </form>
+        <div class="status" id="courseStatus"></div>
+        <div id="courseTable"></div>
+      </section>
+    </div>
+
+    <div class="grid" style="margin-top: 18px;">
+      <section class="card" style="grid-column: 1 / -1;">
+        <h2>Allocations</h2>
+        <p class="hint">Map a division &times; subject to its teacher. Pick a subject with practicals and the two batch-faculty pickers appear automatically (the two lab halves run simultaneously in different labs).</p>
+        <form id="allocationForm">
+          <div class="fields">
+            <div class="field"><label>Division</label><select name="division_id" id="allocDivisionSelect" required></select></div>
+            <div class="field"><label>Subject</label><select name="course_id" id="allocCourseSelect" required></select></div>
+            <div class="field" id="allocSingleField"><label>Faculty (whole division)</label><select name="faculty_id" id="allocFacultySelect"></select></div>
+            <div class="field" id="allocBatch1Field" style="display:none"><label>Batch 1 faculty</label><select name="batch1_faculty_id" id="allocBatch1Select"></select></div>
+            <div class="field" id="allocBatch2Field" style="display:none"><label>Batch 2 faculty</label><select name="batch2_faculty_id" id="allocBatch2Select"></select></div>
+          </div>
+          <button type="submit">Add allocation</button>
+        </form>
+        <div class="status" id="allocationStatus"></div>
+        <div id="allocationTable"></div>
+      </section>
+    </div>
+
+    <div class="grid" style="margin-top: 18px;">
+      <section class="card">
+        <h2>Rooms</h2>
+        <p class="hint">Shared across every branch. Lectures are scheduled only in classrooms and labs only in labs, so you need at least two labs for batch-split practicals.</p>
+        <form id="roomForm">
+          <div class="fields">
+            <div class="field"><label>Code</label><input name="code" placeholder="CR51" required></div>
+            <div class="field"><label>Name</label><input name="name" placeholder="Classroom 51" required></div>
+            <div class="field"><label>Capacity</label><input name="capacity" type="number" value="70" min="1" required></div>
+            <div class="field"><label>Type</label><select name="room_type"><option value="classroom">Classroom</option><option value="lab">Lab</option></select></div>
+          </div>
+          <button type="submit">Add room</button>
+        </form>
+        <div class="status" id="roomStatus"></div>
+        <div id="roomTable"></div>
+      </section>
+
+      <section class="card">
+        <h2>Weekly slot grid</h2>
+        <p class="hint">One institutional grid (Mon&ndash;Fri &times; periods). Use the generator to build a standard day, then Save &mdash; saving <b>replaces</b> the whole grid.</p>
+        <form id="slotForm">
+          <div class="fields">
+            <div class="field"><label>Days</label><input name="days" type="number" value="5" min="1" max="7" required></div>
+            <div class="field"><label>Periods / day</label><input name="periods" type="number" value="8" min="1" max="14" required></div>
+            <div class="field"><label>First period starts</label><input name="start" value="08:00" required></div>
+            <div class="field"><label>Minutes / period</label><input name="minutes" type="number" value="60" min="30" max="120" step="5" required></div>
+          </div>
+          <button type="submit">Build &amp; save grid</button>
+        </form>
+        <div class="status" id="slotStatus"></div>
+        <div id="slotTable"></div>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const state = { faculty: [], branches: [], divisions: [], allocations: [], courses: [], rooms: [], slots: [] };
+
+    function setStatus(id, text, tone = "") {
+      const node = $(id);
+      node.textContent = text;
+      node.className = "status " + tone;
+    }
+
+    function esc(value) {
+      return String(value ?? "").replace(/[&<>\"]/g, (ch) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+      })[ch]);
+    }
+
+    function renderFaculty() {
+      const rows = state.faculty.map((f) => `
+        <tr><td>${f.id}</td><td>${esc(f.code)}</td><td>${esc(f.name)}</td><td>${f.max_load_hours_per_week}</td></tr>`).join("");
+      $("facultyTable").innerHTML = `
+        <table>
+          <thead><tr><th>ID</th><th>Code</th><th>Name</th><th>Load</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="4" class="muted">No faculty yet</td></tr>`}</tbody>
+        </table>`;
+    }
+
+    function renderBranches() {
+      const rows = state.branches.map((b) => `
+        <tr><td>${b.id}</td><td>${esc(b.code)}</td><td>${esc(b.name)}</td><td>${esc(b.semester_label || "")}</td></tr>`).join("");
+      $("branchTable").innerHTML = `
+        <table>
+          <thead><tr><th>ID</th><th>Code</th><th>Name</th><th>Semester</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="4" class="muted">No branches yet</td></tr>`}</tbody>
+        </table>`;
+    }
+
+    function renderAllocations() {
+      const divisionsById = new Map(state.divisions.map((d) => [d.id, d]));
+      const coursesById = new Map(state.courses.map((c) => [c.id, c]));
+      const facultyById = new Map(state.faculty.map((f) => [f.id, f]));
+      const facCode = (id) => (id ? (facultyById.get(id)?.code || `#${id}`) : "");
+      const rows = state.allocations.map((a) => {
+        const division = divisionsById.get(a.division_id);
+        const course = coursesById.get(a.course_id);
+        const b1 = facCode(a.batch1_faculty_id);
+        const b2 = facCode(a.batch2_faculty_id);
+        const mapping = (b1 || b2)
+          ? `<span class="tag">batch 1: ${esc(b1)}</span> <span class="tag">batch 2: ${esc(b2)}</span>`
+          : (facCode(a.faculty_id) ? `<span class="tag">${esc(facCode(a.faculty_id))}</span>` : `<span class="muted">unassigned</span>`);
+        return `
+          <tr>
+            <td>${a.id}</td>
+            <td>${division ? esc(division.name) : `#${a.division_id}`}
+                ${division ? `<span class="muted">(${esc(branchLabel(division.branch_id))})</span>` : ""}</td>
+            <td>${course ? `${esc(course.code)} <span class="muted">${esc(course.title)}</span>` : `#${a.course_id}`}</td>
+            <td>${mapping}</td>
+          </tr>`;
+      }).join("");
+      $("allocationTable").innerHTML = `
+        <table>
+          <thead><tr><th>ID</th><th>Division</th><th>Subject</th><th>Faculty mapping</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="4" class="muted">No allocations yet</td></tr>`}</tbody>
+        </table>`;
+    }
+
+    const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+    function branchLabel(id) {
+      const b = state.branches.find((x) => x.id === id);
+      return b ? b.code : `#${id}`;
+    }
+
+    function renderDivisions() {
+      const rows = state.divisions.map((d) => `
+        <tr>
+          <td>${d.id}</td><td>${esc(d.name)}</td><td><span class="tag">${esc(branchLabel(d.branch_id))}</span></td>
+          <td>${esc(d.program)} &middot; sem ${d.semester}</td><td>${d.student_count}</td>
+          <td class="muted">${esc(d.batch1_name || d.name + "1")} / ${esc(d.batch2_name || d.name + "2")}</td>
+        </tr>`).join("");
+      $("divisionTable").innerHTML = `
+        <table>
+          <thead><tr><th>ID</th><th>Name</th><th>Branch</th><th>Program</th><th>Students</th><th>Batches</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="6" class="muted">No divisions yet</td></tr>`}</tbody>
+        </table>`;
+    }
+
+    function renderCourses() {
+      const rows = state.courses.map((c) => `
+        <tr>
+          <td>${c.id}</td><td>${esc(c.code)}</td><td>${esc(c.title)}</td>
+          <td><span class="tag">${esc(branchLabel(c.branch_id))}</span></td>
+          <td>${esc(c.category)}</td><td>${c.credits}</td>
+          <td>${c.theory_per_week}T / ${c.practical_per_week}P / ${c.tutorial_per_week}Tu${c.is_heavy ? ' <span class="tag">heavy</span>' : ""}</td>
+        </tr>`).join("");
+      $("courseTable").innerHTML = `
+        <table>
+          <thead><tr><th>ID</th><th>Code</th><th>Title</th><th>Branch</th><th>Category</th><th>Cr</th><th>Sessions/wk</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="7" class="muted">No subjects yet</td></tr>`}</tbody>
+        </table>`;
+    }
+
+    function renderRooms() {
+      const rows = state.rooms.map((r) => `
+        <tr><td>${r.id}</td><td>${esc(r.code)}</td><td>${esc(r.name)}</td><td>${r.capacity}</td>
+        <td><span class="tag">${esc(r.room_type)}</span></td></tr>`).join("");
+      const labs = state.rooms.filter((r) => r.room_type === "lab").length;
+      const warn = state.rooms.length && labs < 2
+        ? `<div class="status bad">Only ${labs} lab room(s): batch-split practicals need at least 2.</div>` : "";
+      $("roomTable").innerHTML = `
+        <table>
+          <thead><tr><th>ID</th><th>Code</th><th>Name</th><th>Capacity</th><th>Type</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="5" class="muted">No rooms yet</td></tr>`}</tbody>
+        </table>${warn}`;
+    }
+
+    function renderSlots() {
+      if (!state.slots.length) {
+        $("slotTable").innerHTML = `<p class="muted">No slot grid saved yet.</p>`;
+        return;
+      }
+      const byDay = new Map();
+      state.slots.forEach((s) => {
+        if (!byDay.has(s.day)) byDay.set(s.day, []);
+        byDay.get(s.day).push(s);
+      });
+      const days = [...byDay.keys()].sort((a, b) => a - b);
+      const periods = [...new Set(state.slots.map((s) => s.period))].sort((a, b) => a - b);
+      const head = `<tr><th>Period</th>${days.map((d) => `<th>${DAY_NAMES[d] || d}</th>`).join("")}</tr>`;
+      const body = periods.map((p) => {
+        const cells = days.map((d) => {
+          const slot = (byDay.get(d) || []).find((s) => s.period === p);
+          return `<td class="muted">${slot ? `${esc(slot.start)}&ndash;${esc(slot.end)}` : ""}</td>`;
+        }).join("");
+        return `<tr><td>${p}</td>${cells}</tr>`;
+      }).join("");
+      $("slotTable").innerHTML =
+        `<table><thead>${head}</thead><tbody>${body}</tbody></table>
+         <div class="status">${state.slots.length} slots across ${days.length} day(s).</div>`;
+    }
+
+    function fillSelect(select, items, toLabel, { placeholder, keepValue = true } = {}) {
+      if (!select) return;
+      const previous = keepValue ? select.value : "";
+      const opts = items.map((it) => `<option value="${it.id}">${esc(toLabel(it))}</option>`).join("");
+      select.innerHTML = (placeholder ? `<option value="">${esc(placeholder)}</option>` : "") + opts;
+      if (previous && items.some((it) => String(it.id) === previous)) select.value = previous;
+    }
+
+    function courseLabel(c) {
+      const shape = `${c.theory_per_week}T/${c.practical_per_week}P/${c.tutorial_per_week}Tu`;
+      return `${c.code} — ${c.title} [${branchLabel(c.branch_id)}] (${shape})`;
+    }
+
+    function selectedAllocCourse() {
+      const id = Number($("allocCourseSelect").value);
+      return state.courses.find((c) => c.id === id) || null;
+    }
+
+    // Practical courses are taught as two simultaneous batch halves, so they need a faculty per
+    // batch; non-practical courses take a single whole-division faculty. Mirror that rule in the
+    // form so the API's 400 is unreachable by normal use.
+    function syncAllocationFields() {
+      const course = selectedAllocCourse();
+      const isPractical = !!course && course.practical_per_week > 0;
+      $("allocSingleField").style.display = isPractical ? "none" : "";
+      $("allocBatch1Field").style.display = isPractical ? "" : "none";
+      $("allocBatch2Field").style.display = isPractical ? "" : "none";
+      $("allocFacultySelect").required = !isPractical;
+      $("allocBatch1Select").required = isPractical;
+      $("allocBatch2Select").required = isPractical;
+    }
+
+    function refreshSelects() {
+      const branchOpts = (b) => `${b.code} — ${b.name}`;
+      fillSelect($("divisionBranchSelect"), state.branches, branchOpts, { placeholder: "Select branch" });
+      fillSelect($("courseBranchSelect"), state.branches, branchOpts, { placeholder: "Select branch" });
+      fillSelect($("allocDivisionSelect"), state.divisions,
+        (d) => `${d.name} [${branchLabel(d.branch_id)}]`, { placeholder: "Select division" });
+      fillSelect($("allocCourseSelect"), state.courses, courseLabel, { placeholder: "Select subject" });
+      const facLabel = (f) => `${f.code} — ${f.name}`;
+      fillSelect($("allocFacultySelect"), state.faculty, facLabel, { placeholder: "Select faculty" });
+      fillSelect($("allocBatch1Select"), state.faculty, facLabel, { placeholder: "Select faculty" });
+      fillSelect($("allocBatch2Select"), state.faculty, facLabel, { placeholder: "Select faculty" });
+      syncAllocationFields();
+    }
+
+    async function fetchJson(url, options) {
+      const res = await fetch(url, options);
+      const text = await res.text();
+      if (!res.ok) throw new Error(text || `HTTP ${res.status}`);
+      return text ? JSON.parse(text) : null;
+    }
+
+    async function loadAll() {
+      const [faculty, branches, allocations, courses, rooms, slots] = await Promise.all([
+        fetchJson("/api/faculty"),
+        fetchJson("/api/branches"),
+        fetchJson("/api/allocations"),
+        fetchJson("/api/courses"),
+        fetchJson("/api/rooms"),
+        fetchJson("/api/slots"),
+      ]);
+      state.faculty = faculty;
+      state.branches = branches;
+      state.allocations = allocations;
+      state.courses = courses;
+      state.rooms = rooms;
+      state.slots = slots;
+
+      const divisionLists = await Promise.all(branches.map((b) => fetchJson(`/api/branches/${b.id}/divisions`)));
+      state.divisions = divisionLists.flat();
+
+      renderFaculty();
+      renderBranches();
+      renderDivisions();
+      renderCourses();
+      renderAllocations();
+      renderRooms();
+      renderSlots();
+      refreshSelects();
+    }
+
+    $("facultyForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.target);
+      const payload = {
+        code: form.get("code"),
+        name: form.get("name"),
+        max_load_hours_per_week: Number(form.get("max_load_hours_per_week") || 20),
+        max_consecutive_sessions: Number(form.get("max_consecutive_sessions") || 2),
+        unavailable_slot_ids: [],
+      };
+      try {
+        await fetchJson("/api/faculty", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        event.target.reset();
+        setStatus("facultyStatus", "Faculty saved.", "ok");
+        await loadAll();
+      } catch (error) {
+        setStatus("facultyStatus", error.message || String(error), "bad");
+      }
+    });
+
+    $("branchForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.target);
+      const payload = {
+        code: form.get("code"),
+        name: form.get("name"),
+        semester_label: form.get("semester_label") || "",
+      };
+      try {
+        await fetchJson("/api/branches", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        event.target.reset();
+        setStatus("branchStatus", "Branch saved.", "ok");
+        await loadAll();
+      } catch (error) {
+        setStatus("branchStatus", error.message || String(error), "bad");
+      }
+    });
+
+    $("allocCourseSelect").addEventListener("change", syncAllocationFields);
+
+    $("allocationForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.target);
+      const course = selectedAllocCourse();
+      const isPractical = !!course && course.practical_per_week > 0;
+      const num = (key) => (form.get(key) ? Number(form.get(key)) : null);
+      // send only the shape the API expects for this course kind, so a leftover value from the
+      // hidden half of the form can't ride along
+      const payload = {
+        division_id: Number(form.get("division_id")),
+        course_id: Number(form.get("course_id")),
+        faculty_id: isPractical ? null : num("faculty_id"),
+        batch1_faculty_id: isPractical ? num("batch1_faculty_id") : null,
+        batch2_faculty_id: isPractical ? num("batch2_faculty_id") : null,
+      };
+      try {
+        await fetchJson("/api/allocations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        setStatus("allocationStatus", "Allocation saved.", "ok");
+        await loadAll();
+      } catch (error) {
+        setStatus("allocationStatus", error.message || String(error), "bad");
+      }
+    });
+
+    $("divisionForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.target);
+      const branchId = Number(form.get("branch_id"));
+      if (!branchId) { setStatus("divisionStatus", "Pick a branch first.", "bad"); return; }
+      // branch_id travels in the URL path, not the body (POST /api/branches/{id}/divisions)
+      const payload = {
+        name: form.get("name"),
+        program: form.get("program"),
+        semester: Number(form.get("semester") || 1),
+        student_count: Number(form.get("student_count") || 60),
+        batch1_name: form.get("batch1_name") || "",
+        batch2_name: form.get("batch2_name") || "",
+      };
+      try {
+        await fetchJson(`/api/branches/${branchId}/divisions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        setStatus("divisionStatus", "Division saved.", "ok");
+        await loadAll();
+      } catch (error) {
+        setStatus("divisionStatus", error.message || String(error), "bad");
+      }
+    });
+
+    $("courseForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.target);
+      const branchId = Number(form.get("branch_id"));
+      if (!branchId) { setStatus("courseStatus", "Pick a branch first.", "bad"); return; }
+      const payload = {
+        branch_id: branchId,
+        code: form.get("code"),
+        title: form.get("title"),
+        credits: Number(form.get("credits") || 3),
+        category: form.get("category"),
+        theory_per_week: Number(form.get("theory_per_week") || 0),
+        practical_per_week: Number(form.get("practical_per_week") || 0),
+        tutorial_per_week: Number(form.get("tutorial_per_week") || 0),
+        is_heavy: form.get("is_heavy") === "true",
+      };
+      try {
+        await fetchJson("/api/courses", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        setStatus("courseStatus", "Subject saved.", "ok");
+        await loadAll();
+      } catch (error) {
+        setStatus("courseStatus", error.message || String(error), "bad");
+      }
+    });
+
+    $("roomForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.target);
+      const payload = {
+        code: form.get("code"),
+        name: form.get("name"),
+        capacity: Number(form.get("capacity") || 60),
+        room_type: form.get("room_type"),
+      };
+      try {
+        await fetchJson("/api/rooms", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        event.target.reset();
+        setStatus("roomStatus", "Room saved.", "ok");
+        await loadAll();
+      } catch (error) {
+        setStatus("roomStatus", error.message || String(error), "bad");
+      }
+    });
+
+    function addMinutes(hhmm, minutes) {
+      const [h, m] = hhmm.split(":").map(Number);
+      const total = h * 60 + m + minutes;
+      const hh = String(Math.floor(total / 60) % 24).padStart(2, "0");
+      const mm = String(total % 60).padStart(2, "0");
+      return `${hh}:${mm}`;
+    }
+
+    $("slotForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.target);
+      const days = Number(form.get("days") || 5);
+      const periods = Number(form.get("periods") || 8);
+      const minutes = Number(form.get("minutes") || 60);
+      const first = String(form.get("start") || "08:00");
+      if (!/^\d{1,2}:\d{2}$/.test(first)) {
+        setStatus("slotStatus", "Start time must look like 08:00.", "bad");
+        return;
+      }
+      // PUT /api/slots has replace-all semantics: build the full weekly grid and send it at once
+      const grid = [];
+      for (let day = 0; day < days; day += 1) {
+        for (let period = 0; period < periods; period += 1) {
+          const start = addMinutes(first, period * minutes);
+          grid.push({ day, period, start, end: addMinutes(start, minutes) });
+        }
+      }
+      try {
+        await fetchJson("/api/slots", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(grid),
+        });
+        setStatus("slotStatus", `Saved ${grid.length} slots (${days} days × ${periods} periods).`, "ok");
+        await loadAll();
+      } catch (error) {
+        setStatus("slotStatus", error.message || String(error), "bad");
+      }
+    });
+
+    const STATUS_IDS = ["facultyStatus", "branchStatus", "divisionStatus", "courseStatus",
+                        "allocationStatus", "roomStatus", "slotStatus"];
+    const setAllStatus = (text, tone = "") => STATUS_IDS.forEach((id) => setStatus(id, text, tone));
+
+    $("refreshAllBtn").addEventListener("click", async () => {
+      try {
+        setAllStatus("Refreshing...");
+        await loadAll();
+        setAllStatus("Data refreshed.");
+      } catch (error) {
+        setAllStatus(error.message || String(error), "bad");
+      }
+    });
+
+    loadAll().catch((error) => setAllStatus(error.message || String(error), "bad"));
+  </script>
+</body>
+</html>

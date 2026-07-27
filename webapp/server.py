@@ -196,6 +196,11 @@ def platform_page():
     return FileResponse(str(STATIC_DIR / "platform.html"))
 
 
+@app.get("/dashboard")
+def dashboard_page():
+    return FileResponse(str(STATIC_DIR / "dashboard.html"))
+
+
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 

@@ -20,6 +20,8 @@ from starlette.background import BackgroundTask
 from timetable.disruption import affected_slots_for_day, replan
 from timetable.export import export_pdf, export_xlsx
 from timetable.io_json import problem_from_dict, problem_to_dict, solution_from_dict
+from timetable.pipeline import PipelineConfig, run_pipeline
+from timetable.scoring import score
 from timetable.solvers import SOLVERS
 from timetable.view import solution_to_grids
 from webapp.db import get_session
@@ -40,6 +42,13 @@ class GenerateRequest(BaseModel):
     time_limit: float = 30.0
     label: str = ""
     branch_ids: list[int] | None = None
+
+
+class CompareRequest(BaseModel):
+    time_limit: float = 30.0
+    label: str = ""
+    branch_ids: list[int] | None = None
+    solvers: list[str] | None = None
 
 
 @router.post("/runs")
@@ -74,6 +83,78 @@ def generate(
 
     background.add_task(run_generation, run.id)
     return {"run_id": run.id}
+
+
+def _run_solver_compare(problem, solver_name: str, time_limit: float) -> dict:
+    if solver_name == "pipeline":
+        config = PipelineConfig(
+            cpsat_time_limit_s=time_limit,
+            ga_time_limit_s=min(time_limit, 30),
+            mip_time_limit_s=min(time_limit, 60),
+        )
+        result = run_pipeline(problem, config)
+        solution = result.final
+        stage_reports = [{
+            "name": rep.name,
+            "status": rep.solver_status,
+            "wall_clock_s": round(rep.wall_clock_s, 1),
+            "hard": rep.hard_violations,
+            "soft": round(rep.soft_cost, 1),
+            "best_hard": rep.running_best_hard,
+            "best_soft": round(rep.running_best_soft, 1),
+            "improved": rep.improved,
+        } for rep in result.reports]
+        wall_clock_s = result.total_wall_clock_s
+        notes = result.notes
+    else:
+        solver = SOLVERS[solver_name]()
+        solution = solver.solve(problem, time_limit_s=time_limit)
+        stage_reports = None
+        wall_clock_s = solution.wall_clock_seconds
+        notes = []
+
+    sc = score(solution, problem)
+    return {
+        "solver": solver_name,
+        "final_solver": solution.solver_name,
+        "status": solution.status,
+        "hard_violations": sc.hard_violations,
+        "soft_cost": round(sc.soft_cost, 1),
+        "wall_clock_s": round(wall_clock_s, 1),
+        "stage_reports": stage_reports,
+        "notes": notes,
+        "grids": solution_to_grids(solution, problem),
+    }
+
+
+@router.post("/compare")
+def compare(body: CompareRequest, session: Session = Depends(get_session)):
+    problem, issues = readiness(session, body.branch_ids)
+    if problem is None or issues:
+        raise HTTPException(status_code=400, detail=issues)
+
+    solvers = body.solvers or ["pipeline", "cpsat", "greedy"]
+    unique_solvers: list[str] = []
+    for solver_name in solvers:
+        if solver_name not in unique_solvers:
+            unique_solvers.append(solver_name)
+
+    if len(unique_solvers) == 0:
+        raise HTTPException(status_code=400, detail="compare mode needs at least one solver")
+
+    invalid = [solver_name for solver_name in unique_solvers if solver_name != "pipeline" and solver_name not in SOLVERS]
+    if invalid:
+        raise HTTPException(status_code=400, detail=f"unknown solver(s): {', '.join(invalid)}")
+
+    results = [_run_solver_compare(problem, solver_name, body.time_limit) for solver_name in unique_solvers]
+    best_index = min(range(len(results)), key=lambda i: (results[i]["hard_violations"], results[i]["soft_cost"]))
+    return {
+        "label": body.label,
+        "solvers": unique_solvers,
+        "best_index": best_index,
+        "best_solver": results[best_index]["solver"],
+        "results": results,
+    }
 
 
 @router.get("/runs")
