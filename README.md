@@ -32,12 +32,44 @@ pip install -r requirements.txt
 python -m uvicorn webapp.server:app --port 8750
 ```
 
-Then open **<http://127.0.0.1:8750/platform>**.
+Then open **<http://127.0.0.1:8750/login>**.
 
 > **Use port 8750.** Port 8000 is OS-reserved on the project's dev machine.
 >
-> **Open `/platform`, not `/`.** The bare `/` is a legacy in-memory showcase kept for reference —
-> it does not use the database and is not the platform.
+> Every page (`/`, `/platform`, `/dashboard`, `/my-timetable`) requires a logged-in session and
+> redirects to `/login` otherwise — see **Auth** below.
+
+### Auth: first login on a fresh database
+
+A fresh database has no accounts yet, so the login page's **"Claim a teacher account"** link runs a
+one-time bootstrap: it claims login credentials for a faculty member already in the system. That
+means you need faculty rows to exist first — load the reference dataset via that same flow, or seed
+it directly:
+
+```bash
+curl -X POST http://127.0.0.1:8750/api/seed/reference
+```
+
+Then bootstrap a login for any seeded faculty code (the reference dataset's first entry is `NM` /
+Dr. Nilesh Marathe) — either through the login page's bootstrap form, or directly:
+
+```bash
+curl -X POST http://127.0.0.1:8750/api/auth/bootstrap \
+  -H "Content-Type: application/json" \
+  -d '{"faculty_code": "NM", "email": "nilesh.marathe@djsce.edu.in", "password": "Timetable@123"}'
+```
+
+**Sample credentials for local dev/testing** (after running the bootstrap call above):
+
+| Field | Value |
+|---|---|
+| Role | Teacher |
+| Email | `nilesh.marathe@djsce.edu.in` |
+| Password | `Timetable@123` |
+
+Bootstrap only works **once** per database — the first successful call locks it out permanently, so
+every login after that goes through the normal `/login` form. Students log in the same way but have
+no bootstrap path; a teacher creates student accounts from `/dashboard`.
 
 ### First run: seed, then generate
 
@@ -46,7 +78,8 @@ banner reads *"no divisions defined, no time slots defined"*. Load the starter d
 
 1. **① Starter data** → click **Load reference data**. This imports the real DJSCE CSE-DS
    SY Sem-IV dataset (1 branch, 3 divisions, 20 faculty, 8 subjects, 8 rooms, a 5×8 slot grid) as
-   a normal, fully editable branch. It refuses to run twice unless you force a re-seed.
+   a normal, fully editable branch. It refuses to run twice unless you force a re-seed. (Skip this
+   if you already seeded it via the Auth step above.)
 2. **② Readiness** → should now show **Ready to generate**. This banner is the engine's own
    `validate()` output, so it names exactly what is missing (e.g. *"D2 has no faculty allocated
    for PBC"*).
@@ -62,8 +95,12 @@ On the reference dataset, CP-SAT with a 60 s budget reaches **0 hard violations*
 | Screen | URL | What it's for |
 |---|---|---|
 | **Platform** | `/platform` | Seed → readiness → generate → view → export → compare → adjust. The main workflow. |
-| **Dashboard** | `/dashboard` | Data entry for every entity: Faculty, Branches, Divisions, Subjects, Allocations, Rooms, Weekly slot grid. Use this to edit the seeded data or build a term from scratch. |
-| **Legacy showcase** | `/` | The original stateless demo (in-memory, no database). Kept for the pipeline-stage visualization; not part of the platform. |
+| **Dashboard** | `/` or `/dashboard` | Data entry for every entity: Faculty, Branches, Divisions, Subjects, Allocations, Rooms, Weekly slot grid. Use this to edit the seeded data or build a term from scratch. `/` is the same page as `/dashboard`, both behind login. |
+| **My Timetable** | `/my-timetable` | A logged-in teacher's own personal timetable — every session they teach, merged across every division they're allocated to. This is where teacher login lands by default. |
+| **Student view** | `/student` | A logged-in student's read-only view of their own division's timetable. This is where student login lands by default. |
+
+All of the above require a logged-in session (see **Auth**, above) — anonymous requests redirect to
+`/login`, and a student who lands on a teacher-only page is redirected to `/student` instead.
 
 ### Compare solvers (⑤)
 
