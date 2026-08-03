@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
+from webapp.auth import require_faculty
 from webapp.db import get_session
 from webapp.models_db import Allocation, Branch, Course, CourseCreate, CourseUpdate
 from webapp.routers._crud import apply_update, get_or_404, validate_category
@@ -20,7 +21,8 @@ def _validate_session_counts(theory: int, practical: int, tutorial: int) -> None
 
 
 @router.get("/courses")
-def list_courses(branch_id: int | None = None, session: Session = Depends(get_session)):
+def list_courses(branch_id: int | None = None, session: Session = Depends(get_session),
+                 _=Depends(require_faculty)):
     stmt = select(Course)
     if branch_id is not None:
         stmt = stmt.where(Course.branch_id == branch_id)
@@ -28,7 +30,7 @@ def list_courses(branch_id: int | None = None, session: Session = Depends(get_se
 
 
 @router.post("/courses", status_code=201)
-def create_course(body: CourseCreate, session: Session = Depends(get_session)):
+def create_course(body: CourseCreate, session: Session = Depends(get_session), _=Depends(require_faculty)):
     get_or_404(session, Branch, body.branch_id)
     validate_category(body.category)
     _validate_session_counts(body.theory_per_week, body.practical_per_week, body.tutorial_per_week)
@@ -40,12 +42,13 @@ def create_course(body: CourseCreate, session: Session = Depends(get_session)):
 
 
 @router.get("/courses/{course_id}")
-def get_course(course_id: int, session: Session = Depends(get_session)):
+def get_course(course_id: int, session: Session = Depends(get_session), _=Depends(require_faculty)):
     return get_or_404(session, Course, course_id)
 
 
 @router.put("/courses/{course_id}")
-def update_course(course_id: int, body: CourseUpdate, session: Session = Depends(get_session)):
+def update_course(course_id: int, body: CourseUpdate, session: Session = Depends(get_session),
+                  _=Depends(require_faculty)):
     course = get_or_404(session, Course, course_id)
     if body.category is not None:
         validate_category(body.category)
@@ -59,7 +62,7 @@ def update_course(course_id: int, body: CourseUpdate, session: Session = Depends
 
 
 @router.delete("/courses/{course_id}")
-def delete_course(course_id: int, session: Session = Depends(get_session)):
+def delete_course(course_id: int, session: Session = Depends(get_session), _=Depends(require_faculty)):
     course = get_or_404(session, Course, course_id)
     for alloc in session.exec(select(Allocation).where(Allocation.course_id == course_id)).all():
         session.delete(alloc)

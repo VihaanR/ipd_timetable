@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Log in — DJ Sanghvi Timetable Platform</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">TT</div>
+    <div>
+      <h1>DJ Sanghvi Timetable Platform</h1>
+      <p class="sub">NEP 2020 dynamic timetable generation &middot; SIH 25091</p>
+    </div>
+  </div>
+</header>
+
+<div class="auth-wrap">
+  <div class="auth-card">
+    <h2>Log in</h2>
+    <p class="auth-hint" id="authHint">Choose your role and sign in.</p>
+
+    <div class="role-toggle">
+      <button type="button" id="roleTeacherBtn" class="active">Teacher</button>
+      <button type="button" id="roleStudentBtn">Student</button>
+    </div>
+
+    <p class="auth-error" id="authError"></p>
+
+    <form id="loginForm">
+      <div class="auth-field">
+        <label for="email">Email</label>
+        <input type="email" id="email" required autocomplete="username">
+      </div>
+      <div class="auth-field">
+        <label for="password">Password</label>
+        <input type="password" id="password" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="auth-submit" id="submitBtn">Log in</button>
+    </form>
+
+    <div class="auth-bootstrap-toggle">
+      <a id="showBootstrap">First time setting up this platform? Claim a teacher account &rarr;</a>
+    </div>
+
+    <form id="bootstrapForm" style="display:none; margin-top:18px; border-top:1px solid var(--line); padding-top:18px;">
+      <p class="auth-hint">
+        One-time setup: claim login credentials for a faculty member already in the system
+        (e.g. seeded from the reference dataset). This only works before anyone has logged in yet.
+      </p>
+      <div class="auth-field">
+        <label for="bsCode">Faculty code</label>
+        <input type="text" id="bsCode" placeholder="e.g. AR" required>
+      </div>
+      <div class="auth-field">
+        <label for="bsEmail">Email</label>
+        <input type="email" id="bsEmail" required>
+      </div>
+      <div class="auth-field">
+        <label for="bsPassword">Choose a password</label>
+        <input type="password" id="bsPassword" required minlength="6">
+      </div>
+      <button type="submit" class="auth-submit" id="bootstrapBtn">Claim account &amp; log in</button>
+    </form>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let role = "faculty";
+
+$("roleTeacherBtn").addEventListener("click", () => setRole("faculty"));
+$("roleStudentBtn").addEventListener("click", () => setRole("student"));
+
+function setRole(r) {
+  role = r;
+  $("roleTeacherBtn").classList.toggle("active", r === "faculty");
+  $("roleStudentBtn").classList.toggle("active", r === "student");
+  $("authHint").textContent = r === "faculty"
+    ? "Teachers can edit the dashboard, generate timetables, and see their own schedule."
+    : "Students get a read-only view of their division's timetable.";
+}
+
+function showError(message) {
+  const box = $("authError");
+  box.textContent = message;
+  box.style.display = message ? "block" : "none";
+}
+
+$("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  showError("");
+  $("submitBtn").disabled = true;
+  try {
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role, email: $("email").value, password: $("password").value }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || "login failed");
+    }
+    const data = await res.json();
+    window.location.href = data.role === "student" ? "/student" : "/my-timetable";
+  } catch (err) {
+    showError(err.message || String(err));
+  } finally {
+    $("submitBtn").disabled = false;
+  }
+});
+
+$("showBootstrap").addEventListener("click", () => {
+  $("bootstrapForm").style.display = $("bootstrapForm").style.display === "none" ? "block" : "none";
+});
+
+$("bootstrapForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  showError("");
+  $("bootstrapBtn").disabled = true;
+  try {
+    const res = await fetch("/api/auth/bootstrap", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        faculty_code: $("bsCode").value, email: $("bsEmail").value, password: $("bsPassword").value,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || "bootstrap failed");
+    }
+    window.location.href = "/";
+  } catch (err) {
+    showError(err.message || String(err));
+  } finally {
+    $("bootstrapBtn").disabled = false;
+  }
+});
+</script>
+</body>
+</html>

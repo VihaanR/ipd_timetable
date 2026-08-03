@@ -8,6 +8,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
+from webapp.auth import require_faculty
 from webapp.db import get_session
 from webapp.models_db import SlotTemplate, SlotTemplateCreate
 
@@ -15,13 +16,14 @@ router = APIRouter(prefix="/api", tags=["slots"])
 
 
 @router.get("/slots")
-def list_slots(session: Session = Depends(get_session)):
+def list_slots(session: Session = Depends(get_session), _=Depends(require_faculty)):
     rows = session.exec(select(SlotTemplate)).all()
     return sorted(rows, key=lambda s: (s.day, s.period))
 
 
 @router.put("/slots")
-def replace_slots(body: list[SlotTemplateCreate], session: Session = Depends(get_session)):
+def replace_slots(body: list[SlotTemplateCreate], session: Session = Depends(get_session),
+                  _=Depends(require_faculty)):
     for existing in session.exec(select(SlotTemplate)).all():
         session.delete(existing)
     session.flush()

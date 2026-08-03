@@ -180,3 +180,81 @@ table.history-table th, table.history-table td {
   padding: 8px 10px; font-size: 13px; border-bottom: 1px solid var(--line); text-align: left;
 }
 table.history-table th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 11px; }
+
+/* -------------------------------------------------------------- auth (login.html, student.html) */
+.auth-wrap {
+  min-height: calc(100vh - 84px); display: flex; align-items: center; justify-content: center;
+  padding: 40px 20px;
+}
+.auth-card {
+  width: 100%; max-width: 400px; background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 32px 30px;
+}
+.auth-card h2 { margin: 0 0 6px; font-size: 19px; }
+.auth-card p.auth-hint { margin: 0 0 22px; color: var(--muted); font-size: 13px; }
+.role-toggle { display: flex; gap: 8px; margin-bottom: 20px; }
+.role-toggle button {
+  flex: 1; padding: 10px; border: 1px solid var(--line); border-radius: 9px; cursor: pointer;
+  background: var(--panel-2); color: var(--muted); font-weight: 600; font-size: 13.5px;
+}
+.role-toggle button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.auth-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.auth-field label { font-size: 11.5px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+.auth-field input { width: 100%; }
+.auth-submit {
+  width: 100%; padding: 11px; border: none; border-radius: 10px; cursor: pointer;
+  font-size: 14px; font-weight: 700; color: #fff; background: var(--accent); margin-top: 4px;
+}
+.auth-submit:disabled { opacity: .5; cursor: not-allowed; }
+.auth-error {
+  margin: 0 0 14px; padding: 10px 12px; border-radius: 9px; font-size: 13px;
+  background: rgba(255,107,107,.12); border: 1px solid var(--bad); color: var(--bad); display: none;
+}
+.auth-bootstrap-toggle { margin-top: 18px; text-align: center; font-size: 12.5px; color: var(--muted); }
+.auth-bootstrap-toggle a { color: var(--accent); cursor: pointer; text-decoration: underline; }
+.navbar {
+  display: flex; align-items: center; gap: 4px; padding: 0 28px; background: var(--accent);
+  border-top: 1px solid rgba(255,255,255,.15);
+}
+.navbar a {
+  color: rgba(255,255,255,.82); text-decoration: none; font-size: 13.5px; font-weight: 600;
+  padding: 12px 14px; display: inline-block; border-bottom: 3px solid transparent;
+}
+.navbar a:hover, .navbar a.active { color: #fff; border-bottom-color: var(--accent-2); }
+.navbar .nav-user { margin-left: auto; color: rgba(255,255,255,.75); font-size: 13px; }
+.navbar .nav-user button {
+  margin-left: 10px; padding: 5px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,.35);
+  background: transparent; color: #fff; cursor: pointer; font-size: 12.5px;
+}
+.navbar .nav-user button:hover { background: rgba(255,255,255,.12); }
+
+/* -------------------------------------------------------------- dashboard.html (entity data-entry) */
+.dash-wrap { max-width: 1280px; margin: 0 auto; padding: 24px 28px 60px; }
+.dash-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px;
+  margin-top: 18px;
+}
+.dash-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; }
+.dash-card h2 { margin: 0 0 12px; font-size: 16px; }
+.dash-card .hint { color: var(--muted); font-size: 13px; margin-bottom: 12px; line-height: 1.5; }
+.dash-card form { display: grid; gap: 10px; margin-bottom: 14px; }
+.dash-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.dash-field { display: flex; flex-direction: column; }
+.dash-field label { font-size: 11.5px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 6px; }
+.dash-status { margin-top: 6px; color: var(--muted); font-size: 13px; min-height: 18px; }
+.dash-status.ok { color: var(--good); font-weight: 600; }
+.dash-status.bad { color: var(--bad); font-weight: 600; }
+.dash-card table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+.dash-card th, .dash-card td { text-align: left; padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 13.5px; }
+.dash-card th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+.dash-tag { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 20px; background: var(--panel-2); font-size: 12px; }
+.dash-actions-cell { white-space: nowrap; }
+.dash-form-actions { display: flex; gap: 10px; align-items: center; }
+.dash-del-btn, .dash-edit-btn {
+  border-radius: 8px; padding: 4px 10px; font-size: 12px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--line); white-space: nowrap; background: transparent;
+}
+.dash-del-btn { color: var(--bad); border-color: var(--bad); }
+.dash-del-btn:hover { background: rgba(255,107,107,.1); }
+.dash-edit-btn { color: var(--accent); border-color: var(--accent); margin-right: 6px; }
+.dash-edit-btn:hover { background: rgba(0,56,119,.08); }

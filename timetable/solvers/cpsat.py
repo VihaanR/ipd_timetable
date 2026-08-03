@@ -17,7 +17,7 @@ from ortools.sat.python import cp_model
 from timetable.models import (
     Assignment, CourseCategory, ProblemInstance, Solution, SessionType, expand_requirements,
 )
-from timetable.scoring import COMPACT_DAY_SPAN  # keep the day-span target in sync with the scorer
+from timetable.scoring import COMPACT_DAY_SPAN, MAX_CONTINUOUS_TEACHING_PERIODS  # keep in sync with scorer
 from timetable.solvers.base import SolverBase
 from timetable.solvers.candidates import (
     NO_ROOM, batch_group_members, build_candidates, slots_by_day, sync_group_members,
@@ -78,6 +78,24 @@ class CPSATSolver(SolverBase):
                             _accumulate(batch_terms, (req.division_id, b, sid), var)
                     else:
                         _accumulate(batch_terms, (req.division_id, req.batch_id, sid), var)
+
+        # teaching-only occupancy (excludes breaks) per (division_id, slot_id), for the
+        # continuous-teaching limit (constraint 21). Batch-pair labs are counted once via the
+        # first-seen half (the batch-pair same-slot equality constraint guarantees the other half
+        # is 1 at exactly the same slot).
+        division_teaching_terms: dict = {}
+        seen_teaching_groups: set[str] = set()
+        for req in requirements:
+            if req.is_break:
+                continue
+            if req.batch_group_id:
+                if req.batch_group_id in seen_teaching_groups:
+                    continue
+                seen_teaching_groups.add(req.batch_group_id)
+            for (start_id, occ_ids, day, room_id) in candidates[req.id]:
+                var = x[(req.id, start_id, room_id)]
+                for sid in occ_ids:
+                    _accumulate(division_teaching_terms, (req.division_id, sid), var)
 
         for vars_ in room_terms.values():
             model.AddAtMostOne(vars_)
@@ -174,6 +192,22 @@ class CPSATSolver(SolverBase):
             expr = sum(v * d for v, d in terms)
             model.Add(expr >= 6)
             model.Add(expr <= 8)
+
+        # no more than MAX_CONTINUOUS_TEACHING_PERIODS (4 hours) of contiguous non-break teaching
+        # periods per division per day (hard constraint 21): for every window of (cap+1) consecutive
+        # periods in a day, at most `cap` may be busy with teaching sessions
+        for division_id in {r.division_id for r in requirements}:
+            for day, day_slots in days.items():
+                if day in relaxed:
+                    continue
+                cap = MAX_CONTINUOUS_TEACHING_PERIODS
+                for start in range(len(day_slots) - cap):
+                    window = day_slots[start:start + cap + 1]
+                    window_terms = []
+                    for ts in window:
+                        window_terms.extend(division_teaching_terms.get((division_id, ts.id), []))
+                    if window_terms:
+                        model.Add(sum(window_terms) <= cap)
 
         # each division's day must START at the first period (08:00) -- no empty leading slot
         first_slot_id_by_day = {day: ds[0].id for day, ds in days.items() if ds}

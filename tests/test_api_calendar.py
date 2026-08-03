@@ -20,12 +20,14 @@ from PIL import Image
 from sqlmodel import Session, create_engine
 
 from webapp.db import get_engine, set_engine, init_db
-from webapp.models_db import CalendarEvent
+from webapp.models_db import CalendarEvent, Faculty
 from webapp.server import app
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    """A TestClient already logged in as a teacher (Auth, design.md §11) - see the identical note
+    in tests/test_api_entities.py's fixture."""
     db_file = tmp_path / "test_platform.db"
     engine = create_engine(f"sqlite:///{db_file}", connect_args={"check_same_thread": False})
     set_engine(engine)
@@ -35,7 +37,12 @@ def client(tmp_path, monkeypatch):
     # Never let a real key leak into these tests - extraction must always take the 501 path
     # unless a specific test explicitly wants otherwise (none do; see the trust-boundary test).
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    with Session(engine) as session:
+        session.add(Faculty(code="TESTFAC", name="Test Teacher"))
+        session.commit()
     with TestClient(app) as c:
+        c.post("/api/auth/bootstrap",
+               json={"faculty_code": "TESTFAC", "email": "test@test.local", "password": "testpass123"})
         yield c
     engine.dispose()
 

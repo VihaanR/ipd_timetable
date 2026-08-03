@@ -24,6 +24,7 @@ from timetable.pipeline import PipelineConfig, run_pipeline
 from timetable.scoring import score
 from timetable.solvers import SOLVERS
 from timetable.view import solution_to_grids
+from webapp.auth import require_faculty
 from webapp.db import get_session
 from webapp.jobs import has_active_run, run_generation
 from webapp.models_db import TimetableRun
@@ -56,6 +57,7 @@ def generate(
     body: GenerateRequest,
     background: BackgroundTasks,
     session: Session = Depends(get_session),
+    _=Depends(require_faculty),
 ):
     # Cheapest check first: the single-flight guard is one indexed row lookup, so it must reject
     # a busy platform (409) before we pay for the expensive readiness build below (which assembles
@@ -128,7 +130,7 @@ def _run_solver_compare(problem, solver_name: str, time_limit: float) -> dict:
 
 
 @router.post("/compare")
-def compare(body: CompareRequest, session: Session = Depends(get_session)):
+def compare(body: CompareRequest, session: Session = Depends(get_session), _=Depends(require_faculty)):
     problem, issues = readiness(session, body.branch_ids)
     if problem is None or issues:
         raise HTTPException(status_code=400, detail=issues)
@@ -158,7 +160,7 @@ def compare(body: CompareRequest, session: Session = Depends(get_session)):
 
 
 @router.get("/runs")
-def list_runs(session: Session = Depends(get_session)):
+def list_runs(session: Session = Depends(get_session), _=Depends(require_faculty)):
     runs = session.exec(select(TimetableRun).order_by(TimetableRun.created_at.desc())).all()
     return [
         {
@@ -175,7 +177,7 @@ def list_runs(session: Session = Depends(get_session)):
 
 
 @router.get("/runs/{run_id}")
-def get_run(run_id: int, session: Session = Depends(get_session)):
+def get_run(run_id: int, session: Session = Depends(get_session), _=Depends(require_faculty)):
     run = session.get(TimetableRun, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"run {run_id} not found")
@@ -230,13 +232,13 @@ def _export_response(run: TimetableRun, export_fn, suffix: str, media_type: str)
 
 
 @router.get("/runs/{run_id}/export.xlsx")
-def export_run_xlsx(run_id: int, session: Session = Depends(get_session)):
+def export_run_xlsx(run_id: int, session: Session = Depends(get_session), _=Depends(require_faculty)):
     run = _get_done_run(run_id, session)
     return _export_response(run, export_xlsx, ".xlsx", XLSX_MEDIA_TYPE)
 
 
 @router.get("/runs/{run_id}/export.pdf")
-def export_run_pdf(run_id: int, session: Session = Depends(get_session)):
+def export_run_pdf(run_id: int, session: Session = Depends(get_session), _=Depends(require_faculty)):
     run = _get_done_run(run_id, session)
     return _export_response(run, export_pdf, ".pdf", PDF_MEDIA_TYPE)
 
@@ -245,22 +247,40 @@ class AdjustRunRequest(BaseModel):
     day: int                          # 0=Mon .. 4=Fri — the disrupted weekday
     from_period: int | None = None    # None => whole-day holiday; N => rain from period N onward
     reason: str = ""                  # "holiday" | "rain" | free text (annotation only)
+    solver: str = "cpsat"             # the re-solve is a full-week solve now — solver/budget matter
+    time_limit_s: float = 60.0
+    # Owner-decided escape hatch (design.md §7): when a disruption is over-constrained (a whole-day
+    # holiday removes ~20% of weekly capacity, which no solver can absorb without breaking some
+    # other day's 6-8h cap), the ADMIN — not the algorithm — names extra days to exempt from the
+    # day-shaped hard rules so the overflow has somewhere legal to land. Default: only the
+    # disrupted day, matching the previous behavior.
+    extra_relaxed_days: list[int] = []
 
 
 @router.post("/runs/{run_id}/adjust")
-def adjust_run(run_id: int, body: AdjustRunRequest, session: Session = Depends(get_session)):
+def adjust_run(run_id: int, body: AdjustRunRequest, session: Session = Depends(get_session),
+               _=Depends(require_faculty)):
     """Disruption re-plan against a stored run (design.md §7). Loads the run's problem snapshot +
-    baseline solution, blocks the disrupted window, and returns a minimal-change overlay: unaffected
-    days are kept verbatim, displaced sessions are relocated within the disrupted day where they fit,
-    and any that don't are reported as dropped. The stored run is never mutated (stateless overlay)."""
+    baseline solution, blocks the disrupted window, and re-solves the whole week warm-started from
+    the baseline — so a rained-out session is rescheduled elsewhere in the week rather than dropped.
+    Anything that genuinely cannot be placed is reported by name in `unplaced_sessions`. The stored
+    run is never mutated (stateless overlay)."""
     run = _get_done_run(run_id, session)
     problem = problem_from_dict(run.problem_snapshot)
     baseline = solution_from_dict(run.solution)
     if not (0 <= body.day < problem.days_per_week):
         raise HTTPException(status_code=400, detail=f"day must be 0..{problem.days_per_week - 1}")
+    if body.solver != "pipeline" and body.solver not in SOLVERS:
+        raise HTTPException(status_code=400, detail=f"unknown solver {body.solver!r}")
+    bad_days = [d for d in body.extra_relaxed_days if not (0 <= d < problem.days_per_week)]
+    if bad_days:
+        raise HTTPException(status_code=400,
+                            detail=f"extra_relaxed_days must be 0..{problem.days_per_week - 1}")
 
     affected = affected_slots_for_day(problem, body.day, from_period=body.from_period)
-    result = replan(problem, baseline, affected)
+    result = replan(problem, baseline, affected,
+                    relaxed_days=frozenset({body.day} | set(body.extra_relaxed_days)),
+                    time_limit_s=body.time_limit_s, solver=body.solver)
 
     grids = solution_to_grids(result.solution, problem)
     moved = [
@@ -278,10 +298,14 @@ def adjust_run(run_id: int, body: AdjustRunRequest, session: Session = Depends(g
         "disrupted_day": DAY_NAMES[body.day] if body.day < len(DAY_NAMES) else str(body.day),
         "scope": scope,
         "reason": body.reason,
+        "solver": body.solver,
+        "relaxed_days": sorted(result.relaxed_days),
         "affected_slot_ids": sorted(affected),
         "moved_count": len([m for m in moved if not m["dropped"]]),
         "dropped_count": len(result.dropped_session_ids),
         "dropped_session_ids": result.dropped_session_ids,
+        "unplaced_sessions": result.unplaced_sessions,
+        "hard_violations": result.hard_violations,
         "conflict_violations": result.conflict_violations,
         "is_valid": result.is_valid,
         "soft_cost": round(result.soft_cost, 1),
@@ -295,6 +319,7 @@ def adjust_run(run_id: int, body: AdjustRunRequest, session: Session = Depends(g
 def get_readiness(
     branch_ids: list[int] | None = Query(default=None),
     session: Session = Depends(get_session),
+    _=Depends(require_faculty),
 ):
     problem, issues = readiness(session, branch_ids)
     return {"ready": problem is not None and not issues, "issues": issues}

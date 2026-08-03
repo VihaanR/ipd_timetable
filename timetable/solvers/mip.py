@@ -19,6 +19,7 @@ from ortools.linear_solver import pywraplp
 from timetable.models import (
     Assignment, CourseCategory, ProblemInstance, Solution, SessionType, expand_requirements,
 )
+from timetable.scoring import MAX_CONTINUOUS_TEACHING_PERIODS
 from timetable.solvers.base import SolverBase
 
 NO_ROOM = "NONE"
@@ -164,6 +165,24 @@ class MIPSolver(SolverBase):
                         # NOT compete for the whole-division key
                         _accumulate(batch_terms, (req.division_id, req.batch_id, sid), var)
 
+        # teaching-only occupancy (excludes breaks) per (division_id, slot_id), for the
+        # continuous-teaching limit (constraint 21). Batch-pair labs are counted once via the
+        # first-seen half (the batch-pair same-slot equality constraint guarantees the other half
+        # is 1 at exactly the same slot).
+        division_teaching_terms: dict = {}
+        seen_teaching_groups: set[str] = set()
+        for req in requirements:
+            if req.is_break:
+                continue
+            if req.batch_group_id:
+                if req.batch_group_id in seen_teaching_groups:
+                    continue
+                seen_teaching_groups.add(req.batch_group_id)
+            for (start_id, occ_ids, day, room_id, _cost) in candidates[req.id]:
+                var = x[(req.id, start_id, room_id)]
+                for sid in occ_ids:
+                    _accumulate(division_teaching_terms, (req.division_id, sid), var)
+
         for vars_ in room_terms.values():
             solver.Add(sum(vars_) <= 1)
         for vars_ in faculty_terms.values():
@@ -264,6 +283,22 @@ class MIPSolver(SolverBase):
             expr = sum(v * d for v, d in terms)
             solver.Add(expr >= 6)
             solver.Add(expr <= 8)
+
+        # no more than MAX_CONTINUOUS_TEACHING_PERIODS (4 hours) of contiguous non-break teaching
+        # periods per division per day (hard constraint 21): for every window of (cap+1) consecutive
+        # periods in a day, at most `cap` may be busy with teaching sessions
+        for division_id in {r.division_id for r in requirements}:
+            for day, day_slots in slots_by_day.items():
+                if day in relaxed:
+                    continue
+                cap = MAX_CONTINUOUS_TEACHING_PERIODS
+                for start in range(len(day_slots) - cap):
+                    window = day_slots[start:start + cap + 1]
+                    window_terms = []
+                    for ts in window:
+                        window_terms.extend(division_teaching_terms.get((division_id, ts.id), []))
+                    if window_terms:
+                        solver.Add(sum(window_terms) <= cap)
 
         # each division's day must START at the first period (08:00) -- no empty leading slot.
         # A session covers period 0 iff its start slot IS the day's first slot.

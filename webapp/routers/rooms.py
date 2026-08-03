@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
+from webapp.auth import require_faculty
 from webapp.db import get_session
 from webapp.models_db import Room, RoomCreate, RoomUpdate
 from webapp.routers._crud import apply_update, get_or_404, unique_or_400, validate_room_type
@@ -12,12 +13,12 @@ router = APIRouter(prefix="/api", tags=["rooms"])
 
 
 @router.get("/rooms")
-def list_rooms(session: Session = Depends(get_session)):
+def list_rooms(session: Session = Depends(get_session), _=Depends(require_faculty)):
     return session.exec(select(Room)).all()
 
 
 @router.post("/rooms", status_code=201)
-def create_room(body: RoomCreate, session: Session = Depends(get_session)):
+def create_room(body: RoomCreate, session: Session = Depends(get_session), _=Depends(require_faculty)):
     unique_or_400(session, Room, "code", body.code)
     validate_room_type(body.room_type)
     room = Room.model_validate(body)
@@ -28,12 +29,13 @@ def create_room(body: RoomCreate, session: Session = Depends(get_session)):
 
 
 @router.get("/rooms/{room_id}")
-def get_room(room_id: int, session: Session = Depends(get_session)):
+def get_room(room_id: int, session: Session = Depends(get_session), _=Depends(require_faculty)):
     return get_or_404(session, Room, room_id)
 
 
 @router.put("/rooms/{room_id}")
-def update_room(room_id: int, body: RoomUpdate, session: Session = Depends(get_session)):
+def update_room(room_id: int, body: RoomUpdate, session: Session = Depends(get_session),
+                _=Depends(require_faculty)):
     room = get_or_404(session, Room, room_id)
     if body.code is not None:
         unique_or_400(session, Room, "code", body.code, exclude_id=room_id)
@@ -47,7 +49,7 @@ def update_room(room_id: int, body: RoomUpdate, session: Session = Depends(get_s
 
 
 @router.delete("/rooms/{room_id}")
-def delete_room(room_id: int, session: Session = Depends(get_session)):
+def delete_room(room_id: int, session: Session = Depends(get_session), _=Depends(require_faculty)):
     room = get_or_404(session, Room, room_id)
     session.delete(room)
     session.commit()

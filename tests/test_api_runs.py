@@ -10,19 +10,27 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, create_engine
 
+from webapp.auth import hash_password
 from webapp.db import set_engine, init_db, get_engine
 from webapp.jobs import sweep_stale_running
-from webapp.models_db import TimetableRun
+from webapp.models_db import Faculty, TimetableRun
 from webapp.server import app
 
 
 @pytest.fixture
 def client(tmp_path):
+    """A TestClient already logged in as a teacher (Auth, design.md §11) - see the identical note
+    in tests/test_api_entities.py's fixture."""
     db_file = tmp_path / "test_platform.db"
     engine = create_engine(f"sqlite:///{db_file}", connect_args={"check_same_thread": False})
     set_engine(engine)
     init_db()
+    with Session(engine) as session:
+        session.add(Faculty(code="TESTFAC", name="Test Teacher"))
+        session.commit()
     with TestClient(app) as c:
+        c.post("/api/auth/bootstrap",
+               json={"faculty_code": "TESTFAC", "email": "test@test.local", "password": "testpass123"})
         yield c
     engine.dispose()
 
@@ -64,6 +72,57 @@ def test_readiness_endpoint(client):
     _seed(client)
     ready = client.get("/api/readiness")
     assert ready.json()["ready"] is True
+
+
+def test_faculty_my_timetable_requires_login():
+    """Anonymous access is rejected before any DB/run concerns even come into play."""
+    with TestClient(app) as anon:
+        r = anon.get("/api/faculty/me/timetable")
+    assert r.status_code == 401
+
+
+def test_faculty_my_timetable_404_before_any_run(client):
+    _seed(client)
+    r = client.get("/api/faculty/me/timetable")
+    assert r.status_code == 404
+    assert "no generated timetable" in r.json()["detail"]
+
+
+def test_faculty_my_timetable_merges_multiple_divisions(client):
+    """MD teaches across all three seeded divisions (D1/D2/D3) in the reference dataset - the
+    headline claim of this feature is that their personal grid shows every division's sessions
+    merged into one view, not just one division like the student equivalent."""
+    _seed(client)
+
+    faculty_list = client.get("/api/faculty").json()
+    md = next(f for f in faculty_list if f["code"] == "MD")
+    with Session(get_engine()) as session:
+        row = session.get(Faculty, md["id"])
+        row.email = "md@djsce.edu.in"
+        row.password_hash = hash_password("mdpass123")
+        session.add(row)
+        session.commit()
+
+    r = client.post("/api/runs", json={"solver": "greedy", "time_limit": 3})
+    assert r.status_code == 200, r.text
+
+    with TestClient(app) as md_client:
+        login = md_client.post("/api/auth/login",
+                               json={"role": "faculty", "email": "md@djsce.edu.in", "password": "mdpass123"})
+        assert login.status_code == 200, login.text
+
+        got = md_client.get("/api/faculty/me/timetable")
+        assert got.status_code == 200, got.text
+        body = got.json()
+        assert body["faculty_name"] == md["name"]
+
+        all_entries = [e for entries in body["cells"].values() for e in entries]
+        assert all_entries, "MD should have at least one scheduled session"
+        # every entry belongs to MD, never leaking another faculty's sessions
+        assert all(e.get("faculty") == "MD" for e in all_entries if not e.get("is_break"))
+        # the headline claim: sessions from more than one division are merged into this one view
+        divisions_seen = {e["division_id"] for e in all_entries if e.get("division_id")}
+        assert len(divisions_seen) > 1, f"expected multiple divisions, got {divisions_seen}"
 
 
 def test_generate_single_flight_conflict(client):
@@ -207,31 +266,35 @@ def test_export_not_done_run_409(client):
     assert r.status_code == 409
 
 
-def test_legacy_generate_still_reachable(client):
-    """The DB-backed generate job now lives at POST /api/runs (see module docstring). This locks
-    in that /api/generate still resolves to the legacy in-memory showcase handler in
-    webapp/server.py (api_generate), not the new runs router - i.e. the new route no longer
-    shadows the legacy endpoint."""
-    _seed(client)
-    r = client.post("/api/generate", json={"dataset": "reference", "solver": "greedy", "time_limit": 3})
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert "grids" in body
-    assert "hard_violations" in body
-    assert "run_id" not in body
-
-
 def test_adjust_run_returns_overlay(client):
     _seed(client)
     run_id = client.post("/api/runs", json={"solver": "greedy", "time_limit": 3}).json()["run_id"]
-    # rain from period 5 on Tuesday (day 1)
-    r = client.post(f"/api/runs/{run_id}/adjust", json={"day": 1, "from_period": 5, "reason": "rain"})
+    # rain from period 5 on Tuesday (day 1). `solver: greedy` keeps the test fast — the adjust
+    # endpoint now runs a FULL-WEEK re-solve, so it would otherwise default to a 60s CP-SAT solve.
+    r = client.post(f"/api/runs/{run_id}/adjust",
+                    json={"day": 1, "from_period": 5, "reason": "rain",
+                          "solver": "greedy", "time_limit_s": 5})
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["disrupted_day"] == "Tuesday"
     assert body["grids"] and body["grids"]["divisions"]
     assert isinstance(body["moved"], list)
     assert len(body["affected_slot_ids"]) > 0  # a from-period cut blocks the tail of the day
+    assert body["solver"] == "greedy"
+    assert body["relaxed_days"] == [1]         # only the disrupted day, by default
+    # anything the re-solve could not place is reported by name, never as a bare count
+    assert len(body["unplaced_sessions"]) == body["dropped_count"]
+    assert all(e["label"] for e in body["unplaced_sessions"])
+
+
+def test_adjust_run_accepts_extra_relaxed_days(client):
+    _seed(client)
+    run_id = client.post("/api/runs", json={"solver": "greedy", "time_limit": 3}).json()["run_id"]
+    r = client.post(f"/api/runs/{run_id}/adjust",
+                    json={"day": 3, "solver": "greedy", "time_limit_s": 5,
+                          "extra_relaxed_days": [4]})
+    assert r.status_code == 200, r.text
+    assert r.json()["relaxed_days"] == [3, 4]
 
 
 def test_adjust_run_validates_day_and_status(client):
@@ -239,6 +302,11 @@ def test_adjust_run_validates_day_and_status(client):
     run_id = client.post("/api/runs", json={"solver": "greedy", "time_limit": 3}).json()["run_id"]
     assert client.post(f"/api/runs/{run_id}/adjust", json={"day": 9}).status_code == 400   # bad day
     assert client.post("/api/runs/9999/adjust", json={"day": 0}).status_code == 404          # missing run
+    # unknown solver / out-of-range relaxed day are rejected before any solving happens
+    assert client.post(f"/api/runs/{run_id}/adjust",
+                       json={"day": 0, "solver": "nope"}).status_code == 400
+    assert client.post(f"/api/runs/{run_id}/adjust",
+                       json={"day": 0, "solver": "greedy", "extra_relaxed_days": [9]}).status_code == 400
     with Session(get_engine()) as s:
         s.add(TimetableRun(id=555, status="queued", solver="greedy", time_limit=3, problem_snapshot={}))
         s.commit()

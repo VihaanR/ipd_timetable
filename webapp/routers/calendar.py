@@ -30,6 +30,7 @@ from fastapi.responses import FileResponse
 from PIL import Image
 from sqlmodel import Session, select
 
+from webapp.auth import require_faculty
 from webapp.db import get_session
 from webapp.extract_calendar import ExtractionUnavailable, extract_events, extraction_available
 from webapp.models_db import (
@@ -121,6 +122,7 @@ async def _read_capped(file: UploadFile, limit: int) -> bytes:
 async def upload_calendar_file(
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
+    _=Depends(require_faculty),
 ):
     data = await _read_capped(file, MAX_UPLOAD_BYTES)
     if not data:
@@ -145,12 +147,12 @@ async def upload_calendar_file(
 
 
 @router.get("/calendar/uploads")
-def list_uploads(session: Session = Depends(get_session)):
+def list_uploads(session: Session = Depends(get_session), _=Depends(require_faculty)):
     return session.exec(select(CalendarUpload).order_by(CalendarUpload.uploaded_at.desc())).all()
 
 
 @router.get("/calendar/uploads/{upload_id}/file")
-def get_upload_file(upload_id: int, session: Session = Depends(get_session)):
+def get_upload_file(upload_id: int, session: Session = Depends(get_session), _=Depends(require_faculty)):
     upload = get_or_404(session, CalendarUpload, upload_id)
     if not os.path.exists(upload.path):
         raise HTTPException(status_code=404, detail=f"stored file for upload {upload_id} is missing on disk")
@@ -163,6 +165,7 @@ def extract_calendar_events(
     upload_id: int,
     term_id: int | None = None,
     session: Session = Depends(get_session),
+    _=Depends(require_faculty),
 ):
     upload = get_or_404(session, CalendarUpload, upload_id)
 
@@ -227,6 +230,7 @@ def list_events(
     term_id: int | None = None,
     confirmed: bool | None = None,
     session: Session = Depends(get_session),
+    _=Depends(require_faculty),
 ):
     stmt = select(CalendarEvent)
     if term_id is not None:
@@ -237,7 +241,8 @@ def list_events(
 
 
 @router.post("/calendar/events", status_code=201)
-def create_event(body: CalendarEventCreate, session: Session = Depends(get_session)):
+def create_event(body: CalendarEventCreate, session: Session = Depends(get_session),
+                 _=Depends(require_faculty)):
     get_or_404(session, Term, body.term_id)
     _validate_kind(body.kind)
     _validate_source(body.source)
@@ -262,7 +267,8 @@ def create_event(body: CalendarEventCreate, session: Session = Depends(get_sessi
 
 
 @router.put("/calendar/events/{event_id}")
-def update_event(event_id: int, body: CalendarEventUpdate, session: Session = Depends(get_session)):
+def update_event(event_id: int, body: CalendarEventUpdate, session: Session = Depends(get_session),
+                 _=Depends(require_faculty)):
     event = get_or_404(session, CalendarEvent, event_id)
     if body.term_id is not None:
         get_or_404(session, Term, body.term_id)
@@ -276,7 +282,7 @@ def update_event(event_id: int, body: CalendarEventUpdate, session: Session = De
 
 
 @router.delete("/calendar/events/{event_id}")
-def delete_event(event_id: int, session: Session = Depends(get_session)):
+def delete_event(event_id: int, session: Session = Depends(get_session), _=Depends(require_faculty)):
     event = get_or_404(session, CalendarEvent, event_id)
     session.delete(event)
     session.commit()
@@ -284,7 +290,7 @@ def delete_event(event_id: int, session: Session = Depends(get_session)):
 
 
 @router.put("/calendar/events/{event_id}/confirm")
-def confirm_event(event_id: int, session: Session = Depends(get_session)):
+def confirm_event(event_id: int, session: Session = Depends(get_session), _=Depends(require_faculty)):
     """The one and only place `confirmed` may be set to True (CLAUDE.md §12 trust rule)."""
     event = get_or_404(session, CalendarEvent, event_id)
     event.confirmed = True
@@ -296,12 +302,12 @@ def confirm_event(event_id: int, session: Session = Depends(get_session)):
 
 # --------------------------------------------------------------------------- terms
 @router.get("/terms")
-def list_terms(session: Session = Depends(get_session)):
+def list_terms(session: Session = Depends(get_session), _=Depends(require_faculty)):
     return session.exec(select(Term)).all()
 
 
 @router.post("/terms", status_code=201)
-def create_term(body: TermCreate, session: Session = Depends(get_session)):
+def create_term(body: TermCreate, session: Session = Depends(get_session), _=Depends(require_faculty)):
     term = Term.model_validate(body)
     session.add(term)
     session.commit()
@@ -310,12 +316,13 @@ def create_term(body: TermCreate, session: Session = Depends(get_session)):
 
 
 @router.get("/terms/{term_id}")
-def get_term(term_id: int, session: Session = Depends(get_session)):
+def get_term(term_id: int, session: Session = Depends(get_session), _=Depends(require_faculty)):
     return get_or_404(session, Term, term_id)
 
 
 @router.put("/terms/{term_id}")
-def update_term(term_id: int, body: TermUpdate, session: Session = Depends(get_session)):
+def update_term(term_id: int, body: TermUpdate, session: Session = Depends(get_session),
+                _=Depends(require_faculty)):
     term = get_or_404(session, Term, term_id)
     apply_update(term, body)
     session.add(term)

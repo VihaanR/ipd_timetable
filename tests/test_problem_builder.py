@@ -18,11 +18,18 @@ from webapp.server import app
 
 @pytest.fixture
 def client(tmp_path):
+    """A TestClient already logged in as a teacher (Auth, design.md §11) - see the identical note
+    in tests/test_api_entities.py's fixture."""
     db_file = tmp_path / "test_platform.db"
     engine = create_engine(f"sqlite:///{db_file}", connect_args={"check_same_thread": False})
     set_engine(engine)
     init_db()
+    with Session(engine) as session:
+        session.add(Faculty(code="TESTFAC", name="Test Teacher"))
+        session.commit()
     with TestClient(app) as c:
+        c.post("/api/auth/bootstrap",
+               json={"faculty_code": "TESTFAC", "email": "test@test.local", "password": "testpass123"})
         yield c
     engine.dispose()
 
@@ -36,7 +43,8 @@ def test_build_problem_dict_from_reference_seed(client):
         problem = problem_from_dict(data)
 
     assert len(problem.divisions) == 3
-    assert len(problem.faculty) == 20
+    # 20 from the reference seed + 1 (the fixture's own bootstrap "TESTFAC" login account)
+    assert len(problem.faculty) == 21
     assert len(problem.time_slots) == 40
     assert len(problem.courses) == 8
     assert problem.validate() == []
@@ -90,7 +98,8 @@ def test_branch_ids_filter(client):
     assert len(data["divisions"]) == 3
     assert len(data["courses"]) == 8
     # global entities are never branch-filtered
-    assert len(data["faculty"]) == 21
+    # 20 (seed) + 1 (the fixture's bootstrap "TESTFAC" account) + 1 ("ZF" added above) = 22
+    assert len(data["faculty"]) == 22
     assert len(data["rooms"]) == 8
     assert len(data["time_slots"]) == 40
 

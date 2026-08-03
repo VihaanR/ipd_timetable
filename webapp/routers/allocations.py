@@ -9,6 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
+from webapp.auth import require_faculty
 from webapp.db import get_session
 from webapp.models_db import (
     Allocation, AllocationCreate, AllocationUpdate, Course, Division, Faculty,
@@ -41,7 +42,8 @@ def _validate_faculty_shape(session: Session, course: Course, faculty_id, b1, b2
 
 
 @router.get("/allocations")
-def list_allocations(division_id: int | None = None, session: Session = Depends(get_session)):
+def list_allocations(division_id: int | None = None, session: Session = Depends(get_session),
+                     _=Depends(require_faculty)):
     stmt = select(Allocation)
     if division_id is not None:
         stmt = stmt.where(Allocation.division_id == division_id)
@@ -49,7 +51,8 @@ def list_allocations(division_id: int | None = None, session: Session = Depends(
 
 
 @router.post("/allocations", status_code=201)
-def create_allocation(body: AllocationCreate, session: Session = Depends(get_session)):
+def create_allocation(body: AllocationCreate, session: Session = Depends(get_session),
+                      _=Depends(require_faculty)):
     get_or_404(session, Division, body.division_id)
     course = get_or_404(session, Course, body.course_id)
     _validate_faculty_shape(session, course, body.faculty_id, body.batch1_faculty_id, body.batch2_faculty_id)
@@ -61,12 +64,13 @@ def create_allocation(body: AllocationCreate, session: Session = Depends(get_ses
 
 
 @router.get("/allocations/{allocation_id}")
-def get_allocation(allocation_id: int, session: Session = Depends(get_session)):
+def get_allocation(allocation_id: int, session: Session = Depends(get_session), _=Depends(require_faculty)):
     return get_or_404(session, Allocation, allocation_id)
 
 
 @router.put("/allocations/{allocation_id}")
-def update_allocation(allocation_id: int, body: AllocationUpdate, session: Session = Depends(get_session)):
+def update_allocation(allocation_id: int, body: AllocationUpdate, session: Session = Depends(get_session),
+                      _=Depends(require_faculty)):
     alloc = get_or_404(session, Allocation, allocation_id)
     merged = alloc.model_copy(update=body.model_dump(exclude_unset=True))
     course = get_or_404(session, Course, alloc.course_id)
@@ -79,7 +83,7 @@ def update_allocation(allocation_id: int, body: AllocationUpdate, session: Sessi
 
 
 @router.delete("/allocations/{allocation_id}")
-def delete_allocation(allocation_id: int, session: Session = Depends(get_session)):
+def delete_allocation(allocation_id: int, session: Session = Depends(get_session), _=Depends(require_faculty)):
     alloc = get_or_404(session, Allocation, allocation_id)
     session.delete(alloc)
     session.commit()

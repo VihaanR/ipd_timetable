@@ -5,19 +5,29 @@ touched and tests stay isolated.
 """
 import pytest
 from fastapi.testclient import TestClient
-from sqlmodel import create_engine
+from sqlmodel import Session, create_engine
 
 from webapp.db import set_engine, init_db
+from webapp.models_db import Faculty
 from webapp.server import app
 
 
 @pytest.fixture
 def client(tmp_path):
+    """A TestClient already logged in as a teacher (Auth, design.md §11) - every existing test in
+    this file predates auth and calls now-guarded routes with no login of its own, so this fixture
+    bootstraps + logs in a throwaway teacher account before yielding, keeping every test body
+    unchanged."""
     db_file = tmp_path / "test_platform.db"
     engine = create_engine(f"sqlite:///{db_file}", connect_args={"check_same_thread": False})
     set_engine(engine)
     init_db()
+    with Session(engine) as session:
+        session.add(Faculty(code="TESTFAC", name="Test Teacher"))
+        session.commit()
     with TestClient(app) as c:
+        c.post("/api/auth/bootstrap",
+               json={"faculty_code": "TESTFAC", "email": "test@test.local", "password": "testpass123"})
         yield c
     engine.dispose()
 

@@ -75,15 +75,22 @@ class FacultyBase(SQLModel):
     name: str
     max_load_hours_per_week: int = 20
     max_consecutive_sessions: int = 2
+    email: Optional[str] = None     # login identity (Auth, design.md §11) - nullable until a
+                                     # teacher sets credentials for this row
 
 
 class Faculty(FacultyBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     unavailable_slot_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
+    # NEVER on FacultyBase (which doubles as the read/response schema) - only ever read/written by
+    # webapp/auth.py and webapp/routers/auth.py. Every route returning a Faculty row MUST use
+    # response_model=FacultyPublic below so this never serializes.
+    password_hash: Optional[str] = None
 
 
 class FacultyCreate(FacultyBase):
     unavailable_slot_ids: list[int] = []
+    password: Optional[str] = None   # plaintext in; hashed by the router, never stored as-is
 
 
 class FacultyUpdate(SQLModel):
@@ -92,6 +99,13 @@ class FacultyUpdate(SQLModel):
     max_load_hours_per_week: Optional[int] = None
     max_consecutive_sessions: Optional[int] = None
     unavailable_slot_ids: Optional[list[int]] = None
+    email: Optional[str] = None
+    password: Optional[str] = None   # if provided, re-hash and replace; omitted = unchanged
+
+
+class FacultyPublic(FacultyBase):
+    id: int
+    unavailable_slot_ids: list[int] = []
 
 
 # --------------------------------------------------------------------------- course (branch-scoped)
@@ -280,3 +294,63 @@ class CalendarEventUpdate(SQLModel):
     date: Optional[str] = None
     name: Optional[str] = None
     kind: Optional[str] = None
+
+
+# --------------------------------------------------------------------------- student (Auth)
+# Individual student roster + login, added alongside Faculty credentials (design.md §11 Auth).
+# division_id is the DB Division row's int PK - NOT the engine's string division id ("D1", stored
+# on Division.name). Resolving "my division's timetable" means looking up that row's `.name`.
+class StudentBase(SQLModel):
+    roll_no: str = Field(index=True, unique=True)
+    name: str
+    division_id: int = Field(foreign_key="division.id", index=True)
+    email: str = Field(unique=True, index=True)
+
+
+class Student(StudentBase, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    # NEVER on StudentBase - see the identical FacultyPublic/password_hash note above.
+    password_hash: str
+
+
+class StudentCreate(StudentBase):
+    password: str   # plaintext in; hashed by the router, never stored as-is
+
+
+class StudentUpdate(SQLModel):
+    roll_no: Optional[str] = None
+    name: Optional[str] = None
+    division_id: Optional[int] = None
+    email: Optional[str] = None
+    password: Optional[str] = None   # if provided, re-hash and replace; omitted = unchanged
+
+
+class StudentPublic(StudentBase):
+    id: int
+
+
+# --------------------------------------------------------------------------- app secret (Auth)
+# One-row table holding the HMAC signing secret for session tokens (webapp/auth.py). Generated
+# once via secrets.token_hex(32) and reused after - stored in the DB rather than a file so it
+# survives restarts without adding a third allowed write location beyond platform.db/uploads
+# (CLAUDE.md §15).
+class AppSecret(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    value: str
+
+
+# --------------------------------------------------------------------------- manual edit (drag-and-drop)
+# A dated overlay on a run's solution, shaped like design.md's never-built `adjustment` table -
+# the master run/solution is never mutated (same philosophy as the disruption engine). `status`
+# supports the same active/reverted undo pattern already fully specified for `adjustment`.
+class ManualEdit(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    run_id: int = Field(foreign_key="timetablerun.id", index=True)
+    session_id: str
+    from_slot_id: Optional[int] = None
+    from_room_id: Optional[str] = None
+    to_slot_id: int
+    to_room_id: str
+    edited_by_faculty_id: Optional[int] = None   # DB Faculty.id (int PK) - not the engine code
+    status: str = "active"                        # "active" | "reverted"
+    created_at: datetime = Field(default_factory=datetime.utcnow)

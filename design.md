@@ -243,8 +243,8 @@ this API contract** — that is the "enhance, don't add maintenance surface" pos
 
 | Route | Behavior |
 |-------|----------|
-| `POST /api/runs/{run_id}/adjust` `{day, from_period?, reason?}` | **✅ IMPLEMENTED (P4-web, 2026-07-21).** Reconstructs the stored run's problem snapshot + baseline solution, blocks the disrupted window (whole-day holiday if `from_period` omitted, else rain from period N), runs the minimal-change patcher (`disruption.replan`), and returns the adjusted grids + moved/dropped diff. **Stateless overlay — the stored run is never mutated** (no `adjustment` row persisted yet; the frontend `/platform` "Restore original" reverts client-side). Wired into the `/platform` Adjust panel. Still the minimal-change patcher (drops sessions it can't relocate within the day); the full re-solve is the §7 follow-up |
-| `POST /api/adjust` `{day, from_period?}` | **Legacy showcase** disruption against the in-memory `_LAST` baseline (old two-endpoint page at `/`). Superseded by the run-scoped endpoint above for the DB platform |
+| `POST /api/runs/{run_id}/adjust` `{day, from_period?, reason?, solver?, time_limit_s?, extra_relaxed_days?}` | **✅ IMPLEMENTED — full re-solve as of 2026-07-28.** Reconstructs the stored run's problem snapshot + baseline solution, blocks the disrupted window (whole-day holiday if `from_period` omitted, else rain from period N), and **re-solves the whole week** warm-started from the baseline (`disruption.replan`, `mode="resolve"`), so nothing is silently dropped. `solver` (default `cpsat`, validated against the registry) and `time_limit_s` (default 60) control the re-solve; `extra_relaxed_days` opts additional days out of the day-shaped hard rules (§7 item 1). Returns adjusted grids, the moved diff, `hard_violations`, and **`unplaced_sessions`** — each with course/division/faculty and a printable `label` — for the over-constrained case. **Stateless overlay — the stored run is never mutated** (no `adjustment` row persisted yet; the frontend `/platform` "Restore original" reverts client-side) |
+| `POST /api/adjust` `{day, from_period?}` | **Legacy showcase** disruption against the in-memory `_LAST` baseline (old two-endpoint page at `/`). Superseded by the run-scoped endpoint above for the DB platform. Inherits the full re-solve automatically (it calls `replan()` bare, and resolve is now the default) — no solver/budget knobs, by design |
 | `GET /api/adjustments?run_id=` | List overlays for a run (each row tagged `status: "active"` \| `"reverted"`, §7 undo) |
 | `GET /api/adjustments/{id}` | Grids + `moved_sessions` diff |
 | `GET /api/adjustments/{id}/export.xlsx` / `.pdf` | Export of the adjusted day/week |
@@ -281,14 +281,14 @@ behavior, and it is the truthful description of the coupling.
 
 ---
 
-## 7. Disruption Engine ("rain day" flow)  — ⚠️ SUPERSEDED, REBUILD PLANNED
+## 7. Disruption Engine ("rain day" flow)  — ✅ REBUILD IMPLEMENTED (2026-07-28)
 
-**Status as of 2026-07-21: the minimal-change patcher below is BUILT and IMPLEMENTED (9 golden
-tests in `tests/test_disruption.py`, full suite green), but the design decision it encodes has
-been overridden — see "Revised decision" immediately below. The old design is kept in this section
-for the historical record and because `timetable/disruption.py` still matches it until the rebuild
-lands; treat everything under "Original (minimal-change) design" as describing current code, not
-the target.**
+**Status as of 2026-07-28: the full re-solve rebuild is BUILT, wired end-to-end, and green
+(14 tests in `tests/test_disruption.py`, 106-test suite passing).** `mode="resolve"` is the
+default everywhere; `mode="minimal"` (the original patcher, described under "Original
+(minimal-change) design" below) is retained as an opt-in for comparison/rollback and still has its
+own tests. Everything in the "Still to do" checklist further down is now done — see the
+implementation notes marked **DONE (2026-07-28)** on each item.
 
 **Revised decision (owner call, 2026-07-21): full re-solve from scratch, not minimal-change
 patching.** On disruption the platform blocks the affected slots and re-runs a solver over the
@@ -323,11 +323,84 @@ in exchange for "nothing is silently lost."
    should default to something in the 60–300 s range depending on instance size, not the old "30 s,
    pinned instance is tiny" assumption.
 
-**Rebuild work (not yet started — design only, per owner instruction to update design.md first):**
-`timetable/disruption.py`'s `replan()` needs a new code path that builds a `blocked_slot_ids` +
-`relaxed_days` snapshot and calls the pipeline/CP-SAT solver instead of the direct-construction
-greedy-style algorithm below; the 9 existing golden tests will need rewriting since they assert the
-old "unaffected days untouched, overflow dropped" behavior.
+**Rebuild status (updated 2026-07-28): DONE — engine, API, UI, and tests all landed.**
+`timetable/disruption.py`'s `replan()` now accepts `mode: str = "resolve"` (new default) vs
+`mode="minimal"` (the old patcher, kept for comparison/rollback). `mode="resolve"` builds the
+`blocked_slot_ids` + `relaxed_days` snapshot and calls `SOLVERS[solver]().solve(disrupted,
+warm_start=baseline)`; if the exact solver can't reach `hard=0` (a genuinely over-constrained
+window), it falls back to `GreedySolver` and keeps whichever result scores better via
+`scoring.better()`, so the endpoint never raises and never silently drops sessions.
+
+**Verified live on the reference dataset** (rain, Tuesday from period 5, cpsat, 40s budget):
+
+| mode | sessions placed | dropped | hard violations |
+|---|---|---|---|
+| `minimal` (old) | 107/114 | **7** | 7 |
+| `resolve` (new) | **114/114** | **0** | **0** |
+
+**Ship checklist — ALL DONE (2026-07-28):**
+
+1. ✅ **DONE.** `webapp/routers/runs.py`'s `AdjustRunRequest` now carries `solver: str = "cpsat"`,
+   `time_limit_s: float = 60.0`, and `extra_relaxed_days: list[int] = []`, all threaded into
+   `replan(...)`. The endpoint validates `solver` against the `SOLVERS` registry (+`"pipeline"`)
+   and range-checks `extra_relaxed_days`, both 400 before any solving. `relaxed_days` is passed as
+   `{day} ∪ extra_relaxed_days`, so the default stays "only the disrupted day." The response echoes
+   `solver` and the effective `relaxed_days`.
+   `extra_relaxed_days` is the **owner-decided opt-in escape hatch** for over-constrained
+   disruptions — but see the honest limit recorded in item 5 below: it reduces hard violations, it
+   does **not** make a whole-day holiday feasible.
+2. ✅ **DONE.** `AdjustmentResult` gained `unplaced_sessions: list[dict]`, populated by the new
+   `_describe_unplaced()` helper (uses the existing `course_by_code()`/`faculty_by_id()` lookups).
+   Each entry carries `session_id`, `course_code`, `course_title`, `division_id`, `batch_id`,
+   `faculty_id`, `faculty_name`, `session_type`, `from_slot_id`, and a ready-to-print `label`
+   (e.g. `"DS theory (D1) — Dr. Nilesh Marathe, was Friday 09:00-10:00"`). `notes` gets one bullet
+   per session after the count line. Surfaced by the API (`unplaced_sessions`, plus
+   `hard_violations`) and rendered in the `/platform` adjust panel as a bordered message area
+   (`#adjUnplaced`, reusing the `readiness-banner not-ready` style). Applies to `mode="minimal"`
+   too, so its drops are named the same way.
+3. **Manual drag-and-drop timetable editing was requested but is explicitly deferred** — a
+   distinct, larger feature (grid interactivity + a "manually place this session" endpoint +
+   conflict-checking against manual placements), out of scope for the re-solve rebuild itself.
+   Still outstanding; tracked in §10.1 item 4.
+4. ✅ **DONE (no code change needed).** Legacy `webapp/server.py:160` calls
+   `replan(problem, baseline, affected)` bare, so it inherits `mode="resolve"` automatically now
+   that resolve is the default. Verified by grep that no `mode="minimal"` override exists anywhere
+   in the codebase — one less special case, as decided.
+5. ✅ **DONE, with one prediction corrected.** `tests/test_disruption.py` rewritten (14 tests):
+   the partial-day (rain) case now asserts **zero drops** and full placement via a module-scoped
+   CP-SAT replan fixture; the whole-day holiday asserts **honest reporting** (`hard_violations > 0`,
+   populated `unplaced_sessions` with readable labels, nothing placed in the blocked window); the
+   old minimal-change contract moved to explicit `mode="minimal"` tests.
+   `tests/test_api_runs.py` passes `"solver": "greedy"` + a small `time_limit_s` on both adjust
+   tests (they would otherwise have run a 60s CP-SAT solve each) and gained coverage for
+   `extra_relaxed_days` and the two new 400s.
+
+   ⚠️ **The planned test "prove `extra_relaxed_days` lets the holiday case reach
+   `hard_violations == 0`" could not be written — the premise is false.** Measured on the
+   reference dataset: relaxing *every* day still leaves the whole-day holiday at `hard=25,
+   unplaced=18` (vs. `hard=28, unplaced=18` with only the disrupted day relaxed). The reason is
+   structural: `relaxed_days` exempts day-**shape** rules (6–8h load, labs-every-day,
+   one-break-per-day); it **cannot manufacture slots**. A whole-day holiday removes ~20% of weekly
+   capacity, and the surviving four days genuinely cannot hold the week's load — so the unplaceable
+   set is unchanged and only the shape violations clear. The shipped test therefore asserts what is
+   true: `extra_relaxed_days` **strictly lowers `hard_violations` while leaving the unplaced count
+   unchanged**. This is precisely why item 2's named-session reporting matters — for a whole-day
+   holiday, honest reporting is the *only* available answer, not a fallback.
+6. ✅ **DONE.** This section and CLAUDE.md's build-status line updated; full suite green
+   (106 passed).
+
+**Compare-mode UI clarity fix (2026-07-27, small, folded into the same pass):** investigated a
+report that "CP-SAT seems to run the whole GA pipeline from the frontend." Exhaustive check (full
+read of `timetable/solvers/cpsat.py`, whole-repo grep for `GASolver`, re-confirmed the `SOLVERS`
+registry maps `"cpsat"` to `CPSATSolver` only) found no code path where selecting CP-SAT executes
+GA — `GASolver` appears only in `timetable/pipeline.py` (legitimately, as one of the 4 cooperative
+stages when `solver="pipeline"` is chosen), never in `cpsat.py` or the web dispatch layer
+(`webapp/jobs.py`, `webapp/routers/runs.py`, `webapp/server.py`). Working theory: when Compare
+mode has both "CP-SAT" and "Hybrid pipeline" checked, GA genuinely runs as part of the pipeline
+row's own computation — a separate, independent result sitting in the same table next to the
+`cpsat` row — and the two can be misread as related. Fix: label each compare-table row explicitly
+as an independent run (e.g. "cpsat (standalone)" vs "pipeline (greedy→mip→ga→cpsat)") in
+`webapp/static/platform.html`/`platform.js` so this can't be misread again.
 
 **Undo ("no holiday" reversion) — new (2026-07-21).** Since a full re-solve (above) is a much
 bigger perturbation than the old same-day patch, an admin needs an easy way to say "actually, no
@@ -504,11 +577,52 @@ Rule: never delete anything tests import; run `pytest -q` after every removal.
 | **P0 — Groundwork** (½ day) | Solver registry; port 8750 default; add `problem_to_dict`; fix `sync_group_id` bug | `timetable/solvers/__init__.py`, `webapp/server.py`, `webapp/static/app.js`, `timetable/io_json.py`, `timetable/models.py`, `cli.py` | `pytest -q` green; `cli.py` and server share one registry |
 | **P1 — Persistence + CRUD** (2–3 days) | SQLModel tables, entity routers, seed endpoint, SPA nav shell + entry pages 1–5 | `webapp/db.py`, `webapp/models_db.py`, `webapp/routers/*.py`, `webapp/seed.py`, `webapp/static/js/api.js`, `webapp/static/js/pages/*.js` | Reference dataset seeded with one click; every entity editable in the browser |
 | **P2 — Generate + Grids** (1–2 days) | `problem_builder`, jobs, generate/poll/runs/export endpoints, Generate page, readiness banner | `webapp/problem_builder.py`, `webapp/jobs.py`, `webapp/routers/runs.py`, Generate page JS | DB-entered data produces a rendered, exportable timetable with `hard = 0` |
-| **P3 — Calendar** (1–2 days) | Upload + validation + `uploads/`, events review CRUD + UI (Layer 0), optional Claude extraction (Layer 1) | `webapp/routers/calendar.py`, `webapp/extract_calendar.py`, Calendar page JS | A real DJSCE calendar PDF uploaded, holidays confirmed, term view renders |
-| **P4 — Disruption** ✅ **DONE** (built ahead of P1–P3, against an in-memory baseline) | `disruption.py`; `blocked_slot_ids` + `relaxed_days` + `pinned_slots`; `/api/adjust`; Adjust panel with moved/dropped diff | `timetable/disruption.py`, `timetable/models.py`, `timetable/scoring.py`, `timetable/view.py`, `timetable/solvers/candidates.py` + `greedy.py` + `ga.py` + `mip.py` + `cpsat.py`, `webapp/server.py`, `webapp/static/*` | ✅ "Rain from period 5 on Tuesday" re-plans instantly, other days untouched, overflow dropped; 9 golden tests + full suite green |
-| **P5 — Polish** (1 day) | DJSCE light theme, wizard UX pass, docs sync | `webapp/static/style.css`, `index.html` | Palette matches §8.2; end-to-end walkthrough of R1–R7 passes |
+| **P3 — Calendar** 🟡 **BACKEND DONE, UI NOT STARTED** (2026-07-21) | Upload + validation + `uploads/`, events review CRUD + UI (Layer 0), optional Claude extraction (Layer 1) | `webapp/routers/calendar.py` ✅, `webapp/extract_calendar.py` ✅, Calendar page JS ❌ | Backend: upload/extract/events/terms all live-verified over HTTP, 19 tests. **Not done:** no browser page exists to upload, preview, or confirm holidays — R3's "holidays confirmed, term view renders" criterion is unmet until that page is built |
+| **P4 — Disruption** ✅ **DONE (rebuild landed 2026-07-28)** — see §7 | `disruption.py` (`mode="resolve"` default + `mode="minimal"` opt-in); `blocked_slot_ids` + `relaxed_days` + `pinned_slots`; `/api/runs/{id}/adjust` with solver/budget/extra-relaxed-days; Adjust panel with moved diff + named unplaced sessions | `timetable/disruption.py`, `timetable/models.py`, `timetable/scoring.py`, `timetable/view.py`, `timetable/solvers/candidates.py` + `greedy.py` + `ga.py` + `mip.py` + `cpsat.py`, `webapp/routers/runs.py`, `webapp/server.py`, `webapp/static/platform.{html,js}` | ✅ Full re-solve is the default and drops nothing on a partial-day disruption (reference dataset: 114/114 placed, hard=0); over-constrained cases name every unplaceable session instead of dropping silently. 14 disruption tests, 106-test suite green |
+| **P5 — Polish** 🟡 **THEME DONE, PAGE STRUCTURE DIFFERS FROM SPEC** | DJSCE light theme, wizard UX pass, docs sync | `webapp/static/style.css` ✅, `index.html`/`platform.html`/`dashboard.html` 🟡 | Palette matches §8.2 ✅ (verified live). **Deviation from §8.1:** the spec called for an 8-page hash-routed left-nav wizard (`#/faculty`, `#/subjects`, etc.); what's built instead is 3 flat static pages — legacy showcase (`/`), `/platform` (generate/view/export/adjust/compare), `/dashboard` (every entity type on one long scrolling page, no routing). Functionally covers the same ground (every entity is editable, generate/adjust/export all work) but not in the originally-specified multi-page structure. Not fixed as of 2026-07-27 — flagging as a real gap, not silently accepting the deviation |
 
-Total: **~8–11 working days.**
+Total: **~8–11 working days** (original estimate; actual work exceeded this due to the mid-build design changes in §7/§9/§16).
+
+---
+
+### 10.1 Everything still outstanding, project-wide (updated 2026-07-28)
+
+Consolidated so nothing gets lost across sessions. Items already tracked in detail elsewhere are
+referenced, not repeated.
+
+1. ✅ **Disruption full re-solve rebuild — DONE (2026-07-28).** Engine, API, `/platform` UI, and
+   tests all landed; full suite green. Details in §7 (search "Ship checklist"). One design
+   assumption was corrected in the process: `extra_relaxed_days` lowers hard violations but cannot
+   make a whole-day holiday feasible (it relaxes day-shape rules, not slot capacity) — see §7
+   item 5. **The one piece deliberately NOT built** is manual drag-and-drop editing, still tracked
+   as item 4 below.
+2. **Calendar UI** — backend is 100% done and tested; no page exists to upload a calendar file,
+   preview it, or review/confirm extracted holidays (§6 Layer 0/1). Nothing here is design-only —
+   the API contract is already fixed (§5.2) and ready for a page to be built against it.
+3. **Adjustment undo/persistence** — the `adjustment` table (§4.2) and `POST
+   /api/adjustments/{id}/revert` (§7 "Undo" subsection, decided 2026-07-21) were designed in
+   detail but **never implemented**. Today `/platform`'s "Restore original" button is client-side
+   only (resets local JS state) — there is no DB row, no adjustment history, and no way to revert
+   a *stored* run's overlay once the browser tab closes. This becomes more valuable once the full
+   re-solve rebuild ships, since re-solve adjustments are expensive to redo.
+4. **Manual drag-and-drop timetable editing** — requested 2026-07-27, explicitly scoped out of
+   the disruption rebuild (see §7). No design work done yet: would need grid interactivity in
+   `platform.js`, a "manually place this session" endpoint, and conflict-checking against a manual
+   placement. Needs its own design pass before implementation.
+5. **SPA page-structure deviation** (P5 above) — 3 flat pages instead of the spec'd 8-page
+   hash-routed wizard. Decide whether to (a) accept the flat-page structure as the permanent
+   design and update §8.1 to match reality, or (b) actually build the routed wizard. Not decided.
+6. **CLAUDE.md build-status sync** — CLAUDE.md's "Build status" note was last synced before the
+   2026-07-27 disruption/CP-SAT investigation; it should be refreshed to match this section once
+   the rebuild lands, not before (no point syncing twice).
+7. **Known accepted minor rough edges** (already documented, listed here only as a pointer so
+   they aren't rediscovered as "new" bugs): the single-flight guard's check-then-act race (§12),
+   an N+1 `Allocation` query per division in `problem_builder.py` (Minor, noted in review), and
+   `datetime.utcnow` deprecation warnings in `models_db.py` (Minor, cosmetic, Python 3.12+ only).
+8. **Everything in §13 (Future Features F1–F9)** remains undone by design — additive-only
+   extensions, not required by R1–R7, intentionally deferred. Not re-listed here.
+9. **Everything in §14 (Cloud Deployment)** and multi-tenancy/auth remain explicitly out of scope
+   per §1.2 — not "left to do," a deliberate non-goal for this build.
 
 ---
 
@@ -784,3 +898,59 @@ gap this closes).
    legality), and add a day-span regression test.
 5. Re-run `benchmarks/compare_solvers.py` to confirm the new soft terms don't regress overall
    `soft_cost` ranking (CP-SAT still best) — update the CLAUDE.md §13 log if numbers shift.
+
+---
+
+## 17. Hard Constraint 21 — Compulsory Break After 4 Continuous Teaching Hours — ✅ IMPLEMENTED
+
+**Status: IMPLEMENTED 2026-08-03.** Constraint 3 ("exactly one 1-hour break per day, never
+first/last slot") only bounded *that a break exists somewhere* in the legal mid-day band
+(`day_slots[2:-1]`); nothing bounded how far into the day it could sit. Since a division's day
+must start at period 0 (existing hard rule) and typically carries 6–7 teaching hours, a break
+placed at the late end of its legal band (e.g. period 5 or 6 of an 8-period day) allowed 5–6
+continuous teaching hours to accumulate before the first break — a real gap the reference
+dataset's own solver output could hit. Scope is **division-level (students) only**: faculty
+already have a separate, stricter default cap (`Faculty.max_consecutive_sessions = 2`, constraint
+9), so no faculty-side change was needed.
+
+**Implementation:**
+- `scoring.py`: new `MAX_CONTINUOUS_TEACHING_PERIODS = 4` constant; a `division_day_break_periods`
+  tracker records each division's break period per day; the existing per-division/day hard-rule
+  loop (already skipped for `relaxed_days`, alongside daily-load/all-theory-day/empty-first-slot)
+  walks each day's occupied periods with break periods filtered out, flagging
+  `division_continuous_teaching_exceeds_limit` whenever a contiguous non-break run exceeds the cap.
+- `solvers/mip.py` / `solvers/cpsat.py`: mirrored as a linear/CP sliding-window constraint —
+  `division_teaching_terms` (teaching-only occupancy per division/slot, batch-pair labs counted
+  once via the first-seen half) is summed over every window of `cap + 1` consecutive periods per
+  division/day, constrained to `<= cap`, skipping `relaxed_days` — structurally identical to the
+  existing faculty-consecutive-session sliding window.
+- `solvers/ga.py`: no change — GA's fitness calls `scoring.score()` directly, so the new hard
+  violation is penalized automatically. `solvers/greedy.py` / `solvers/candidates.py`: untouched,
+  consistent with the existing precedent that greedy doesn't proactively enforce the analogous
+  faculty-consecutive cap either (a whole-day accumulation rule can't be expressed as per-candidate
+  pruning).
+- `tests/test_breaks.py`: added a `_max_continuous_teaching_run` helper plus regression tests
+  confirming CP-SAT and the full pipeline never exceed the cap (`hard_violations == 0` and no
+  division/day run above 4) on `small_problem`/`reference_problem`.
+
+**Gotcha hit during implementation:** the first pass placed the batch-pair dedup `continue` inside
+the per-*candidate* loop instead of per-*requirement* — this silently dropped every candidate after
+the first for the representative half of a lab pair from `division_teaching_terms`, weakening the
+sliding-window constraint enough that CP-SAT still produced `hard=5` violations on `small_problem`.
+Fixed by building `division_teaching_terms` in its own loop (checking `batch_group_id` membership
+once per requirement, before iterating its candidates), matching the existing `div_day_terms` /
+`day_subject_terms` dedup pattern already used elsewhere in both solvers.
+
+**Follow-on regression: the disruption resolve tests (`tests/test_disruption.py`) needed a wider
+CP-SAT time budget.** `_replan_resolve` (§7) re-solves the *whole week* under CP-SAT, and the new
+sliding-window constraint applies across every undisrupted division/day too — not just the
+disrupted one — so the resolve model got meaningfully harder. The `rain_replan` fixture's `time_limit_s`
+(previously 30s, itself already described as having "deliberate margin" over the ~10s CP-SAT needed
+pre-constraint) started intermittently timing out and falling back to greedy, which does not enforce
+constraint 21, producing `hard_violations` in the 20s–30s range instead of 0. Empirically, 60s alone
+was not a safe fix: it passed standalone but flaked back to `hard=28` when run inside the full
+`test_disruption.py` file (CP-SAT's parallel search is not wall-clock-deterministic near the solving
+frontier, and CPU contention from the module's own `baseline` fixture and earlier tests made the
+margin worse in-suite than in isolation). Widened to `time_limit_s=120`, verified with two full
+back-to-back runs of `test_disruption.py` (14/14 both times) plus a full `pytest tests/` pass
+(109/109) — see `tests/test_disruption.py`'s `rain_replan` fixture comment for the same note.

@@ -44,6 +44,16 @@
     <span id="topLabel"></span>
   </div>
 </header>
+<nav class="navbar">
+  <a href="/dashboard">Dashboard</a>
+  <a href="/platform" class="active">Platform</a>
+  <a href="/my-timetable">My Timetable</a>
+  <a href="/guideline">NEP Guideline</a>
+  <div class="nav-user">
+    <span id="navName"></span>
+    <button type="button" id="logoutBtn">Log out</button>
+  </div>
+</nav>
 
 <main>
 
@@ -156,8 +166,9 @@
   <section class="panel-section" id="adjustSection" style="display:none">
     <h2>6. Holiday / rain adjustment</h2>
     <p class="notes">Adjust the current timetable (run <span id="adjustRunId">—</span>) for a sudden holiday or
-      rain. Unaffected days stay put; sessions in the blocked window are relocated within the day where they
-      fit, otherwise dropped for that occurrence. The stored run is never changed.</p>
+      rain. The blocked window is closed off and the <b>whole week is re-solved</b> around it, warm-started from
+      the current timetable — so a rained-out session is rescheduled elsewhere in the week rather than dropped.
+      Most unaffected sessions stay put, but that is a tendency, not a guarantee. The stored run is never changed.</p>
     <div class="controls">
       <div class="control">
         <label>Day</label>
@@ -180,10 +191,37 @@
         <label>From period (0-based)</label>
         <input type="number" id="adjFrom" value="5" min="1" max="12" step="1">
       </div>
+      <div class="control">
+        <label>Solver</label>
+        <select id="adjSolver">
+          <option value="cpsat">CP-SAT (best quality)</option>
+          <option value="pipeline">Hybrid pipeline</option>
+          <option value="greedy">Greedy (fast preview)</option>
+        </select>
+      </div>
+      <div class="control">
+        <label>Time budget (s)</label>
+        <input type="number" id="adjTimeLimit" value="60" min="5" max="600" step="5">
+      </div>
       <button id="adjustBtn">Apply adjustment</button>
       <button id="restoreBtn" class="secondary" style="display:none">Restore original</button>
     </div>
+    <div class="control-row" id="adjRelaxWrap">
+      <label>Also relax these days
+        <span class="notes">— exempts a day from the 6–8h load / labs-every-day / one-break rules so
+          displaced sessions have somewhere legal to land. Use when a whole-day holiday reports unplaced
+          sessions.</span>
+      </label>
+      <div class="compare-checks" id="adjRelaxDays">
+        <label><input type="checkbox" value="0"> Mon</label>
+        <label><input type="checkbox" value="1"> Tue</label>
+        <label><input type="checkbox" value="2"> Wed</label>
+        <label><input type="checkbox" value="3"> Thu</label>
+        <label><input type="checkbox" value="4"> Fri</label>
+      </div>
+    </div>
     <div class="status-line" id="adjStatus"></div>
+    <div class="readiness-banner not-ready" id="adjUnplaced" style="display:none"></div>
   </section>
 
   <section class="panel-section" id="historySection">

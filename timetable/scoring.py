@@ -17,6 +17,10 @@ from timetable.models import ProblemInstance, Solution, SessionType, CourseCateg
 # 08:00-late template.
 COMPACT_DAY_SPAN = 7
 
+# Max continuous teaching periods (hours) before a break is mandatory (hard constraint 21).
+# 1 slot = 1 hour, so this is directly the period count.
+MAX_CONTINUOUS_TEACHING_PERIODS = 4
+
 SOFT_WEIGHTS = {
     "heavy_subject_run": 5.0,
     "teacher_workload_spread": 1.0,
@@ -85,6 +89,7 @@ def score(solution: Solution, problem: ProblemInstance) -> ScoreResult:
     day_occurrence: dict[tuple[str, str, int], set[str]] = {}
     division_day_has_practical_or_skill: dict[tuple[str, int], bool] = {}
     division_day_periods: dict[tuple[str, int], list[int]] = {}
+    division_day_break_periods: dict[tuple[str, int], set[int]] = {}
     division_day_hours: dict[tuple[str, int], float] = {}
     faculty_day_hours: dict[tuple[str, int], float] = {}
     faculty_day_periods: dict[tuple[str, int], list[int]] = {}
@@ -123,6 +128,9 @@ def score(solution: Solution, problem: ProblemInstance) -> ScoreResult:
                 first_two = {day_slots[0].period, day_slots[1].period} if len(day_slots) > 1 else {day_slots[0].period}
                 if ts.period in first_two or ts.period == day_slots[-1].period:
                     hard_add("break_outside_midday_band")
+            # Record break period for contiguous-teaching-limit checking (hard constraint 21)
+            dkey = (req.division_id, ts.day)
+            division_day_break_periods.setdefault(dkey, set()).add(ts.period)
 
         occupied_ids = _occupied_slot_ids(ts, req.duration_slots, slots_by_day_period, hard_add)
 
@@ -262,8 +270,9 @@ def score(solution: Solution, problem: ProblemInstance) -> ScoreResult:
         )
         for day in range(problem.days_per_week):
             # a disrupted day (rain/holiday) is exempt from the day-shaped hard rules: with part
-            # of the day blocked, a division legitimately can't hit 6-8h, start at period 0, or
-            # keep a lab -- scoring these would declare every re-solve infeasible.
+            # of the day blocked, a division legitimately can't hit 6-8h, start at period 0, have
+            # a lab, or maintain the continuous-teaching limit -- scoring these would declare every
+            # re-solve infeasible.
             if day in problem.relaxed_days:
                 continue
             dkey = (division.id, day)
@@ -281,6 +290,24 @@ def score(solution: Solution, problem: ProblemInstance) -> ScoreResult:
                 occupied_periods = set(division_day_periods.get(dkey, []))
                 if day_slots[0].period not in occupied_periods:
                     hard_add("division_day_has_empty_first_slot")
+            # no more than MAX_CONTINUOUS_TEACHING_PERIODS (4 hours) of contiguous non-break
+            # teaching periods per day (hard constraint 21): a division must have a break every
+            # 4 hours or less, not just somewhere in the day (constraint 3).
+            periods = sorted(set(division_day_periods.get(dkey, [])))
+            break_periods = division_day_break_periods.get(dkey, set())
+            if periods:
+                # filter to only teaching periods (exclude breaks)
+                teaching_periods = [p for p in periods if p not in break_periods]
+                if teaching_periods:
+                    # count contiguous runs of teaching periods
+                    run = 1
+                    for i in range(1, len(teaching_periods)):
+                        if teaching_periods[i] == teaching_periods[i - 1] + 1:
+                            run += 1
+                            if run > MAX_CONTINUOUS_TEACHING_PERIODS:
+                                hard_add("division_continuous_teaching_exceeds_limit")
+                        else:
+                            run = 1  # gap (or break) interrupts the run
 
     # ---- soft constraints ----
     for (div_id, day), periods in division_day_periods.items():

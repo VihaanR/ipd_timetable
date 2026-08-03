@@ -16,6 +16,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
+from webapp.auth import require_faculty_or_pre_bootstrap
 from webapp.db import get_session
 from webapp.models_db import (
     Allocation, Branch, Course, Division, Faculty, Room, SlotTemplate,
@@ -36,7 +37,8 @@ def _wipe(session: Session) -> None:
 
 
 @router.post("/seed/reference")
-def seed_reference(force: bool = False, session: Session = Depends(get_session)):
+def seed_reference(force: bool = False, session: Session = Depends(get_session),
+                   _=Depends(require_faculty_or_pre_bootstrap)):
     existing = session.exec(select(Branch)).first()
     if existing is not None and not force:
         raise HTTPException(

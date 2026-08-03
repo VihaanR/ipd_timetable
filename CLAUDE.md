@@ -86,10 +86,13 @@ design.md            Full platform design spec (architecture, API, schema, roadm
 > calendar backend** (`extract_calendar.py` + `routers/calendar.py` = upload with magic-byte/pillow/
 > pypdf validation + 20 MB cap, term & event CRUD, human-confirm gate, optional Claude-vision
 > extraction that 501s without `ANTHROPIC_API_KEY`); and the **P5 DJSCE light theme** (`style.css`
-> navy `#003877` / orange `#f26d21`). **Not yet built:** the disruption **full re-solve** (design.md
-> §7 — `/adjust` is still the minimal-change patcher that drops un-relocatable sessions), the
-> calendar **UI** (backend is API-only so far), and adjustment undo/persistence (the `adjustment`
-> table + `POST /api/adjustments/{id}/revert`; `/platform` currently reverts client-side only).
+> navy `#003877` / orange `#f26d21`); and the **disruption full re-solve** (2026-07-28 — `replan()`
+> defaults to `mode="resolve"`, a whole-week re-solve that drops nothing, with `mode="minimal"` kept
+> as an opt-in; `POST /api/runs/{id}/adjust` takes `solver`/`time_limit_s`/`extra_relaxed_days`; the
+> API and Adjust panel name every unplaceable session — §12). **Not yet built:** the calendar **UI**
+> (backend is API-only so far), adjustment undo/persistence (the `adjustment` table + `POST
+> /api/adjustments/{id}/revert`; `/platform` currently reverts client-side only), and manual
+> drag-and-drop grid editing (deferred, needs its own design pass).
 > **Note:** DB-backed generate lives at `POST /api/runs` (not `/api/generate`,
 > the legacy in-memory showcase at `/`). The DB-backed adjust is `POST /api/runs/{id}/adjust`.
 
@@ -171,10 +174,14 @@ Implemented once in `timetable/scoring.py`; solvers reference these by name, not
 18. Lectures only in classrooms, labs only in labs.
 19. No all-theory day for a division (needs ≥1 lab/skill component).
 20. *(P4)* Nothing may be scheduled into `ProblemInstance.blocked_slot_ids`.
+21. A division must not have more than `MAX_CONTINUOUS_TEACHING_PERIODS` (4) continuous non-break
+    teaching hours — distinct from constraint 3's "somewhere in the day" break placement, this
+    bounds *where in the run* the break must fall so students never sit through 5+ straight hours.
 
 **Disruption relaxation (P4):** `relaxed_days` exempts a disrupted day from the day-shaped hard
-rules (daily load 6–8, labs-every-day, one-break-per-day) so a rain/holiday re-solve is not
-scored infeasible. Implemented in `scoring.py` first, mirrored in the MIP/CP-SAT builders.
+rules (daily load 6–8, labs-every-day, one-break-per-day, continuous-teaching cap) so a
+rain/holiday re-solve is not scored infeasible. Implemented in `scoring.py` first, mirrored in
+the MIP/CP-SAT builders.
 
 **Soft constraints (minimized in `soft_cost`):** avoid >2 heavy subjects in a row; daily
 theory/lab mix; spread faculty workload; minimize idle gaps; avoid earliest+latest same day;
@@ -340,26 +347,43 @@ the platform UI.
 
 ## 12. Disruption Flow (P4 — IMPLEMENTED) — `timetable/disruption.py`, design.md §7
 
-**Status: built and tested** (engine + `POST /api/adjust` + frontend Adjust panel; 9 golden tests
-in `tests/test_disruption.py`, full suite green). Engine additions (all additive/defaulted, so
-every prior test/caller is unaffected): `ProblemInstance.blocked_slot_ids` (slots nothing may
-occupy), `relaxed_days` (days exempt from the day-shaped hard rules — daily load 6–8, labs-every-
-day, one-break-per-day, period-0-occupied), and `pinned_slots` (`session_id -> slot`, applied in
-`expand_requirements` via the existing `fixed_time_slot_id` mechanism). Enforced once in
-`scoring.py` (single source of truth) and mirrored in `candidates.py`/`greedy.py`/`ga.py` (blocked
-slots) and the MIP/CP-SAT builders (both blocked slots and relaxed-day constraint-skipping).
+**Status: built and tested, full re-solve rebuild landed 2026-07-28** (engine + `POST
+/api/runs/{id}/adjust` + `/platform` Adjust panel; 14 tests in `tests/test_disruption.py`, full
+suite green). Engine additions (all additive/defaulted, so every prior test/caller is unaffected):
+`ProblemInstance.blocked_slot_ids` (slots nothing may occupy), `relaxed_days` (days exempt from the
+day-shaped hard rules — daily load 6–8, labs-every-day, one-break-per-day, period-0-occupied), and
+`pinned_slots` (`session_id -> slot`, applied in `expand_requirements` via the existing
+`fixed_time_slot_id` mechanism). Enforced once in `scoring.py` (single source of truth) and mirrored
+in `candidates.py`/`greedy.py`/`ga.py` (blocked slots) and the MIP/CP-SAT builders (both blocked
+slots and relaxed-day constraint-skipping).
 
-`disruption.replan(problem, baseline, affected_slot_ids, relaxed_days)` does a **minimal-change**
-overlay, built **directly** (not via the exact solvers — `AddExactlyOne` can't drop a rained-out
-session): every UNDISRUPTED day is copied verbatim (identical slot AND room); the disrupted day's
-surviving sessions keep their placement; blocked-window sessions are relocated into that day's free
-non-blocked slots if they fit, else **dropped** for that occurrence (you can't overload another
-day past its 6–8h cap). Returns an `AdjustmentResult` with a `moved_sessions` diff, `dropped_
-session_ids`, and `conflict_violations`/`is_valid` (drops are expected; a valid adjustment has zero
-*conflict* violations among placed sessions). **The master run is never mutated.** `affected_slots_
-for_day(problem, day, from_period)` builds the window: `from_period=None` = whole-day holiday,
-`from_period=N` = rain from period N. Confirmed calendar holidays would pre-fill this flow; they do
-not reshape weekly generation (the engine has no date axis — design.md §12).
+`disruption.replan(problem, baseline, affected_slot_ids, relaxed_days, time_limit_s, mode, solver)`
+has **two modes**:
+
+- **`mode="resolve"` (DEFAULT).** Blocks the disrupted window, relaxes that day's day-shaped rules,
+  and **re-solves the whole week** warm-started from the baseline — so a rained-out lab is rehomed
+  elsewhere in the week rather than discarded. Trades the "unaffected days are byte-identical"
+  guarantee for "nothing is silently lost" (owner call, design.md §7). If the exact solver can't
+  reach `hard=0` it falls back to greedy and keeps whichever scores better via `scoring.better()`,
+  so the endpoint never raises. Reference dataset, rain Tue from p5: **114/114 placed, 0 dropped,
+  hard=0** (the old patcher managed 107/114 with 7 dropped). CP-SAT needs ≥10s here.
+- **`mode="minimal"`.** The original minimal-change patcher, kept for comparison/rollback: undisrupted
+  days copied verbatim, disrupted-day survivors kept, blocked-window sessions relocated within that
+  day if they fit, else **dropped**.
+
+Returns an `AdjustmentResult` with a `moved_sessions` diff, `dropped_session_ids`,
+`conflict_violations`/`is_valid`, and **`unplaced_sessions`** — every unplaceable session named by
+course/division/faculty with a printable `label`, so an over-constrained result is actionable rather
+than a bare count. **The master run is never mutated.** `affected_slots_for_day(problem, day,
+from_period)` builds the window: `from_period=None` = whole-day holiday, `from_period=N` = rain from
+period N.
+
+> **Honest limit:** a whole-day holiday is genuinely infeasible — it removes ~20% of weekly capacity
+> and the surviving four days cannot hold the load. `extra_relaxed_days` (the admin's escape hatch on
+> the adjust endpoint) *lowers* hard violations but cannot fix it, because relaxing day-**shape**
+> rules doesn't manufacture slots. For that case, named honest reporting is the answer, not a
+> re-solve. Confirmed calendar holidays pre-fill this flow; they do not reshape weekly generation
+> (the engine has no date axis — design.md §12).
 
 ## 13. Benchmark Results Log
 

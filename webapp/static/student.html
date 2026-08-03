@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Timetable — DJ Sanghvi Timetable Platform</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div class="logo">TT</div>
+    <div>
+      <h1>DJ Sanghvi Timetable Platform</h1>
+      <p class="sub" id="whoami">Student view</p>
+    </div>
+  </div>
+</header>
+<nav class="navbar">
+  <div class="nav-user">
+    <span id="navName"></span>
+    <button type="button" id="logoutBtn">Log out</button>
+  </div>
+</nav>
+
+<main>
+  <div class="panel-section">
+    <h2>My division's timetable</h2>
+    <p class="status-line" id="status">Loading…</p>
+    <div id="gridArea"></div>
+  </div>
+  <div class="legend">
+    <div class="legend-item"><span class="chip theory"></span> Theory</div>
+    <div class="legend-item"><span class="chip lab"></span> Practical (lab)</div>
+    <div class="legend-item"><span class="chip tut"></span> Tutorial</div>
+    <div class="legend-item"><span class="chip brk"></span> Break</div>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const TYPE_CLASS = { Theory: "theory", Practical: "lab", Tutorial: "tutorial", Break: "break" };
+const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+
+function buildGridTable(data) {
+  const table = document.createElement("table");
+  table.className = "tt";
+  const thead = document.createElement("thead");
+  let hrow = "<tr><th class='time-col'>Time</th>";
+  data.days.forEach((d) => (hrow += `<th>${d}</th>`));
+  hrow += "</tr>";
+  thead.innerHTML = hrow;
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  data.periods.forEach((p) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td class="time-col">${p.start}<br>${p.end}</td>`;
+    data.days.forEach((_, dayIdx) => {
+      const entries = data.cells[`${dayIdx}_${p.period}`] || [];
+      const td = document.createElement("td");
+      if (entries.length === 0) {
+        td.innerHTML = `<div class="cell empty"></div>`;
+      } else {
+        const cell = document.createElement("div");
+        cell.className = "cell";
+        entries.forEach((e) => {
+          const s = document.createElement("div");
+          s.className = "session " + (TYPE_CLASS[e.type] || "theory");
+          if (e.is_break) {
+            s.innerHTML = `<div class="s-course">BREAK</div>`;
+          } else {
+            const batch = e.batch ? ` &middot; ${e.batch}` : "";
+            s.innerHTML =
+              `<div class="s-course">${e.course}${e.type === "Practical" ? " (Lab)" : ""}</div>` +
+              `<div class="s-meta">${e.faculty_name || e.faculty || ""}${e.room_name ? " &middot; @" + e.room_name : ""}${batch}</div>`;
+          }
+          cell.appendChild(s);
+        });
+        td.appendChild(cell);
+      }
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  return table;
+}
+
+async function loadMe() {
+  const res = await fetch("/api/auth/me");
+  if (!res.ok) {
+    window.location.href = "/login";
+    return null;
+  }
+  return res.json();
+}
+
+async function loadTimetable() {
+  const res = await fetch("/api/students/me/timetable");
+  const gridArea = $("gridArea");
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    $("status").textContent = body.detail || "No timetable available yet — check back after a run is generated.";
+    return;
+  }
+  const data = await res.json();
+  $("status").textContent = `Division ${data.division} — from run #${data.run_id}`;
+  gridArea.innerHTML = "";
+  gridArea.appendChild(buildGridTable(data));
+}
+
+$("logoutBtn").addEventListener("click", async () => {
+  await fetch("/api/auth/logout", { method: "POST" });
+  window.location.href = "/login";
+});
+
+(async () => {
+  const me = await loadMe();
+  if (!me) return;
+  $("navName").textContent = me.name;
+  $("whoami").textContent = `Signed in as ${me.name} (student)`;
+  await loadTimetable();
+})();
+</script>
+</body>
+</html>

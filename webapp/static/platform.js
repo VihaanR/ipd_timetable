@@ -458,11 +458,19 @@ async function adjust() {
   btn.disabled = true;
   $("adjStatus").textContent = "adjusting…";
   const scope = $("adjScope").value;
+  const day = parseInt($("adjDay").value, 10);
   const payload = {
-    day: parseInt($("adjDay").value, 10),
+    day,
     from_period: scope === "from" ? (parseInt($("adjFrom").value, 10) || 0) : null,
     reason: scope === "from" ? "rain" : "holiday",
+    solver: $("adjSolver").value,
+    time_limit_s: parseFloat($("adjTimeLimit").value) || 60,
+    // the disrupted day is always relaxed server-side; only send the EXTRA ones the admin ticked
+    extra_relaxed_days: [...$("adjRelaxDays").querySelectorAll("input:checked")]
+      .map((c) => parseInt(c.value, 10))
+      .filter((d) => d !== day),
   };
+  $("adjUnplaced").style.display = "none";
   try {
     const res = await fetch(`/api/runs/${currentRunId}/adjust`, {
       method: "POST",
@@ -478,19 +486,41 @@ async function adjust() {
     currentGrids = d.grids;
     renderTabs();
     renderGrid();
-    const dropped = d.dropped_count
-      ? `, ${d.dropped_count} dropped (rained out)`
-      : "";
     $("adjStatus").innerHTML =
-      `Adjusted: <b>${d.disrupted_day}</b>, ${d.scope} — ` +
-      `${d.moved_count} session(s) moved${dropped}. ` +
-      `Moved sessions are highlighted below.`;
+      `Adjusted: <b>${d.disrupted_day}</b>, ${d.scope} — re-solved with <b>${d.solver}</b>; ` +
+      `${d.moved_count} session(s) moved. Moved sessions are highlighted below.`;
+    renderUnplaced(d.unplaced_sessions || []);
     $("restoreBtn").style.display = "";
   } catch (e) {
     $("adjStatus").textContent = "error: " + (e.message || e);
   } finally {
     btn.disabled = false;
   }
+}
+
+// The over-constrained case (typically a whole-day holiday) can leave sessions with nowhere legal
+// to go. Naming them — course, division, faculty — is the point: an admin can only rearrange what
+// they can see. A bare "7 dropped" is not actionable.
+function renderUnplaced(unplaced) {
+  const box = $("adjUnplaced");
+  if (!unplaced.length) {
+    box.style.display = "none";
+    return;
+  }
+  box.innerHTML =
+    `<b>${unplaced.length} session(s) could not be placed anywhere in the week.</b> ` +
+    `The disruption removes more capacity than the remaining days can absorb. ` +
+    `Tick extra days to relax above and re-apply, or rearrange these by hand:`;
+  // labels embed admin-entered faculty/course names — build the list with textContent so a stray
+  // "<" in a name renders as text instead of markup
+  const list = document.createElement("ul");
+  for (const u of unplaced) {
+    const li = document.createElement("li");
+    li.textContent = u.label || u.session_id;
+    list.appendChild(li);
+  }
+  box.appendChild(list);
+  box.style.display = "";
 }
 
 function restoreOriginal() {
@@ -527,6 +557,25 @@ async function loadHistory() {
   }
 }
 
+// ---------------------------------------------------------------- nav (Auth, design.md §11)
+async function loadNavUser() {
+  try {
+    const res = await fetch("/api/auth/me");
+    if (!res.ok) return;   // the page route already redirects an unauthenticated visitor to
+                            // /login server-side; this only personalizes the nav once loaded
+    const me = await res.json();
+    $("navName").textContent = me.name;
+  } catch (e) {
+    // nav personalization is cosmetic; ignore failures
+  }
+}
+
+$("logoutBtn").addEventListener("click", async () => {
+  await fetch("/api/auth/logout", { method: "POST" });
+  window.location.href = "/login";
+});
+
 // ---------------------------------------------------------------- init
+loadNavUser();
 checkReadiness();
 loadHistory();

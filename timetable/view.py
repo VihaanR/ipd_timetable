@@ -14,10 +14,13 @@ def solution_to_grids(solution: Solution, problem: ProblemInstance) -> dict:
       "days": ["Monday", ...],
       "divisions": [
         {"id", "cells": { "<day>_<period>": [ {course, type, faculty, faculty_name, room,
-                                                room_name, batch, is_break} ... ] }}
+                                                room_name, batch, is_break, division_id} ... ] }}
       ]
     }
-    A cell holds a list because simultaneous lab batch-pairs occupy the same (day, period)."""
+    A cell holds a list because simultaneous lab batch-pairs occupy the same (day, period).
+    `division_id` is included per-entry (not just at the division-grid level) so a per-faculty pivot
+    that merges entries across multiple divisions can still say which division each session belongs
+    to (webapp/routers/faculty.py's `/api/faculty/me/timetable`)."""
     requirements = {r.id: r for r in expand_requirements(problem)}
     slots_by_id = {t.id: t for t in problem.time_slots}
     rooms_by_id = problem.room_by_id()
@@ -48,6 +51,7 @@ def solution_to_grids(solution: Solution, problem: ProblemInstance) -> dict:
             "room_name": room.name if room else "",
             "batch": req.batch_id or "",
             "is_break": req.is_break,
+            "division_id": req.division_id,
         }
         grid = grids.setdefault(req.division_id, {})
         for k in range(req.duration_slots):
